@@ -25,7 +25,8 @@ def mask_random_sections(sequence, mask_token, mask_ratio=0.15):
 
 # Function to preprocess a single protein structure and generate structural tokens
 def preprocess_protein(pdb_path, chain_id):
-    parsed_seqs = get_struc_seq("bin/foldseek", pdb_path, [chain_id])[chain_id]
+    parsed_seqs = get_struc_seq("/home/cactus/micromamba/envs/ml_plm/bin/foldseek",
+                                pdb_path, [chain_id])[chain_id]
     seq, foldseek_seq, combined_seq = parsed_seqs
 
     masked_foldseek_seq = mask_random_sections(foldseek_seq, alphabet.get_tok(alphabet.mask_idx))
@@ -60,7 +61,6 @@ def process_directory(directory):
                 target_structural_sequences.append(target_structural_tokens)
             except Exception as e:
                 print(f"Failed to process {filename}: {e}")
-    
     return esm_sequences, masked_structural_sequences, target_structural_sequences
 
 
@@ -74,3 +74,11 @@ torch.save({
     'masked_structural_sequences': masked_structural_sequences,
     'target_structural_sequences': target_structural_sequences
 }, 'preprocessed_data.pth')
+
+data = torch.load('preprocessed_data.pth')
+esm_sequences = data['esm_sequences']
+print(esm_sequences)
+masked_structural_sequences = data['masked_structural_sequences']
+print(masked_structural_sequences)
+target_structural_sequences = data['target_structural_sequences']
+print(target_structural_sequences)
