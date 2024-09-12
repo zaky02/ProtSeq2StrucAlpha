@@ -1,8 +1,4 @@
 {
-    "input_dim": 33,
-    "output_dim": 33,
-    "embedding_dim": 256,
-    "units": 512,
-    "batch_size": 32,
-    "epochs": 10
+    "data_path": "structures/",
+    "foldseek_path": "bin/foldseek"
 }

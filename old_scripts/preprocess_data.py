@@ -53,6 +53,10 @@ def get_sa_vocab(pdb_path, chain_id):
     return esm_tokens, masked_foldseek_seq, foldseek_seq
     """
 
+'''
+Our masking strategy will be to substitute the tokens with # associated to them
+to have an attention mask value of 0 instead of 1.
+'''
 
 # Function to process all PDB files in a given directory
 def process_directory(directory):
