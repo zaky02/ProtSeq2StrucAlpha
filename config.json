@@ -1,4 +1,9 @@
 {
     "data_path": "structures/",
-    "foldseek_path": "bin/foldseek"
+    "foldseek_path": "bin/foldseek",
+    "get_wandb": false,
+    "wandb_project": "ProtSeq2StrucAlpha_v0",
+    "epochs": 10,
+    "learning_rate": 0.0001,
+    "batch_size": 10
 }

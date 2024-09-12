@@ -2,8 +2,10 @@ import json
 import torch
 import random
 import glob
+import wandb
 from utils.timer import Timer
 from utils.foldseek import get_foldseek_seq
+from tokenizer import SequenceTokenizer, FoldSeekTokenizer
 
 """
 # TO DO: apply masking non-randomly by introducing information
@@ -24,43 +26,71 @@ def masking_seq(seq, mask_token, mask_ratio=0.15):
 masking_seq(seq='AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRr', mask_token='#')
 """
 
-def train_model():
+def train_model(seqs,
+                struc_seqs,
+                epochs: int = 10,
+                learning_rate: float = 0.0001,
+                batch_size: int = 10,
+                verbose=False):
     """
+    Train the model using the specified hyperparamaters
 
+    Args:
+        seqs (list): of protein sequences
+        struc_seqs (list): corresponding foldseek structural sequences
+        epochs: The number of epochs to train the model
+        learning_rate: The learning rate
+        batch_size: The batch size
     """
-    # tokenitzar tot
-    # DataStruc DataLoc
-    # split train test val
-    # ...
-    pass
+    
+
+    # Tokenize protein sequences
+    tokenizer_seqs = SequenceTokenizer()
+
+    # Tokenize structural sequences
+    tokenizer_foldseek = FoldSeekTokenizer()
+
+    # Split the dataset
+
 
 def main(confile):
-    """
-
-    """
     
     with open(confile, 'r') as f:
         config = json.load(f)
 
+    # Get the data
     structures_dir = config["data_path"]
-    foldseek_path = config["foldseek_path"]
     pdbs = glob.glob('%s*.pdb' % structures_dir)
-    print(pdbs)
-    for pdb in pdbs:
-        print(pdb)
-        # At the moment only took seq and struc_seq from chain A
-        seq, struc_seq = get_foldseek_seq(foldseek_path, pdb, chains=['A'])['A']
-        print(seq, struc_seq)
-    exit()
 
-    # pillar tots els foldseek seqs i aa seqs
-    # carregar resta paramatres config (els del model)
-    # carregar wandadb user
+    # Get protein sequence and structural sequence (FoldSeeq)
+    foldseek_path = config["foldseek_path"]
+    data = [get_foldseek_seq(foldseek_path, pdb, chains=['A'])['A'] for pdb in pdbs]
+    seqs = [pdb[0] for pdb in data]
+    struc_seqs = [pdb[1] for pdb in data]
 
-    
+    # Get hyperparamaters
+    get_wandb = config['get_wandb']
+    epochs = config['epochs']
+    learning_rate = config['learning_rate']
+    batch_size = config['batch_size']
+
+    # Configure wandb
+    if get_wandb:
+        wandb.init(
+            project=config["wandb_project"],
+            config={"dataset": "sample_DB",
+                    "architecture": "Transformer"}
+        )
+
+    # Train the model
     timer = Timer(autoreset=True)
     timer.start('Training started')
-    #cridar a train_model
+    train_model(seqs,
+                struc_seqs,
+                epochs,
+                learning_rate,
+                batch_size,
+                verbose=False)
     timer.stop('Training ended')
 
 if __name__ == "__main__":
