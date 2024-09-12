@@ -1,18 +1,10 @@
 import json
 import torch
 import random
+import glob
 from utils.timer import Timer
+from utils.foldseek import get_foldseek_seq
 
-# Load hyperparameters from JSON file
-"""
-input_dim = config["input_dim"]
-output_dim = config["output_dim"]
-embedding_dim = config["embedding_dim"]
-units = config["units"]
-batch_size = config["batch_size"]
-epochs = config["epochs"]
-learning_rate = config["learning_rate"]
-"""
 """
 # TO DO: apply masking non-randomly by introducing information
 # about attention values of the words and mask accordingly. Also, 
@@ -36,18 +28,39 @@ def train_model():
     """
 
     """
+    # tokenitzar tot
+    # DataStruc DataLoc
+    # split train test val
+    # ...
     pass
 
-def main(confile=confile):
+def main(confile):
     """
 
     """
     
     with open(confile, 'r') as f:
         config = json.load(f)
+
+    structures_dir = config["data_path"]
+    foldseek_path = config["foldseek_path"]
+    pdbs = glob.glob('%s*.pdb' % structures_dir)
+    print(pdbs)
+    for pdb in pdbs:
+        print(pdb)
+        # At the moment only took seq and struc_seq from chain A
+        seq, struc_seq = get_foldseek_seq(foldseek_path, pdb, chains=['A'])['A']
+        print(seq, struc_seq)
+    exit()
+
+    # pillar tots els foldseek seqs i aa seqs
+    # carregar resta paramatres config (els del model)
+    # carregar wandadb user
+
     
     timer = Timer(autoreset=True)
     timer.start('Training started')
+    #cridar a train_model
     timer.stop('Training ended')
 
 if __name__ == "__main__":
