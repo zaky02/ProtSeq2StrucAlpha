@@ -1,6 +1,7 @@
 import torch
 import itertools
 from Bio import SeqIO
+from utils.foldseek import get_foldseek_seq
 from SaProt.utils.foldseek_util import get_struc_seq
 
 seq_vocab = "ACDEFGHIKLMNPQRSTVWY#"
@@ -9,7 +10,7 @@ foldseek_struc_vocab = "pynwrqhgdlvtmfsaeikc#"
 # with cls and eos the input max size/length is 1026 (+2)
 max_length = 1024
 
-foldseek_path = '/home/phastos/Programs/mambaforge/envs/SaProt/lib/python3.10/site-packages/SaProt/bin/foldseek'
+foldseek_path = '/home/phastos/Programs/mambaforge/envs/ProtSeq2StrucAlpha/lib/python3.10/site-packages/SaProt/bin/foldseek'
 
 class SaProtTokenizer:
     def __init__(self):
@@ -48,7 +49,7 @@ class SaProtTokenizer:
                  padding=True,
                  max_length=max_length,
                  return_tensors='pt'):
-        
+    
         input_ids = []
         attention_masks = []
 
@@ -58,6 +59,7 @@ class SaProtTokenizer:
 
         for sa in sas:
             sa_list = [sa[i:i+2] for i in range(0, len(sa), 2)]
+            print(len(sa_list))
 
             # Truncation startegy for max_length (not longest)
             if truncation and len(sa_list) > max_length: 
@@ -117,6 +119,7 @@ class SequenceTokenizer:
 
     def __call__(self, pdb_list,
                  truncation=True,
+                 padding=True,
                  max_length=max_length,
                  return_tensors='pt'):
 
@@ -124,14 +127,36 @@ class SequenceTokenizer:
         attention_masks = []
 
         seqs = [self.extract_aa_seq(pdb) for pdb in pdbs]
+        longest = int(max(len(s) for s in seqs)) + 2
+        
         for seq in seqs:
-            print(seq)
+            seq = list(seq)
             print(len(seq))
-            print('---------------------')
+            
+            # Truncation startegy for max_length (not longest)
+            if truncation and len(seq) > max_length: 
+                seq = seq[:max_length]
+                longest = len(seq)
+            
+            seq = [self.cls_token] + seq + [self.eos_token]
+            
+            # Padding strategy longest
+            if padding and len(seq) < longest:
+                seq = seq + [self.pad_token] * (longest - len(seq))
+            
+            input_id = [self.token2id[token] for token in seq]
+            input_ids.append(input_id)
+            attention_mask = [1 if token != self.pad_token else 0 for token in seq]
+            attention_masks.append(attention_mask)
+
+        input_ids_tensor = torch.tensor(input_ids)
+        attention_masks_tensor = torch.tensor(attention_masks)
+        
+        return {'input_ids':input_ids_tensor, 'attention_mask':attention_masks_tensor}
 
     def extract_aa_seq(self, pdb_path, chain_id='A'): 
         with open(pdb_path, 'r') as pdb_file:
-            for record in SeqIO.parse(pdb_file, 'pdb-atom'):
+            for record in SeqIO.parse(pdb_file, 'pdb-seqres'):
                 aa_seq = record.seq
                 return aa_seq
 
@@ -165,14 +190,67 @@ class FoldSeekTokenizer:
         self.mask_idx = self.token2id[self.mask_token]
         self.eos_idx = self.token2id[self.eos_token]
 
-    def __call__(self):
-        pass
+
+    def __call__(self, pdb_list,
+                 truncation=True,
+                 padding=True,
+                 max_length=max_length,
+                 return_tensors='pt'):
+
+        input_ids = []
+        attention_masks = []
+
+        seqs = [get_foldseek_seq(foldseek_path, path=pdb, chains=['A']) for pdb in pdbs]
+        for s in seqs:
+            print(s)
+
+        longest = int(max(len(s) for s in seqs)) + 2
+        print(longest)
+        
+        for seq in seqs:
+            seq = seq['A'].lower()
+            seq = list(seq)
+            
+            # Truncation startegy for max_length (not longest)
+            if truncation and len(seq) > max_length: 
+                seq = seq[:max_length]
+                longest = len(seq)
+            
+            seq = [self.cls_token] + seq + [self.eos_token]
+            
+            # Padding strategy longest
+            if padding and len(seq) < longest:
+                seq = seq + [self.pad_token] * (longest - len(seq))
+                print(seq)
+
+            input_id = [self.token2id[token] for token in seq]
+            input_ids.append(input_id)
+            attention_mask = [1 if token != self.pad_token else 0 for token in seq]
+            attention_masks.append(attention_mask)
+
+        input_ids_tensor = torch.tensor(input_ids)
+        attention_masks_tensor = torch.tensor(attention_masks)
+        
+        return {'input_ids':input_ids_tensor, 'attention_mask':attention_masks_tensor}
+
 
 if __name__ == "__main__":
     import glob
 
     structures_directory = 'structures/'
     pdbs = glob.glob('%s*.pdb'%structures_directory)
-    tokenizer = SequenceTokenizer()
-    inputs = tokenizer(pdbs)
-    print(inputs)
+    
+    # SaProt tokenizer
+    tokenizer_sa = SaProtTokenizer()
+    inputs_sa = tokenizer_sa(pdbs)
+    print(inputs_sa)
+
+    # ESM tokenizer
+    tokenizer_seq = SequenceTokenizer()
+    inputs_seq = tokenizer_seq(pdbs)
+    print(inputs_seq)
+
+    # FoldSeek tokenizer
+    tokenizer_foldseek = FoldSeekTokenizer()
+    inputs_foldseek = tokenizer_foldseek(pdbs)
+    print(inputs_foldseek)
