@@ -1,8 +1,9 @@
 import torch
 import itertools
+from Bio import SeqIO
 from SaProt.utils.foldseek_util import get_struc_seq
 
-foldseek_seq_vocab = "ACDEFGHIKLMNPQRSTVWY#"
+seq_vocab = "ACDEFGHIKLMNPQRSTVWY#"
 foldseek_struc_vocab = "pynwrqhgdlvtmfsaeikc#"
 # max_length refers to aa sequence length no to input length
 # with cls and eos the input max size/length is 1026 (+2)
@@ -26,7 +27,7 @@ class SaProtTokenizer:
                        self.unk_token,
                        self.mask_token]
 
-        for seq_token, struc_token in itertools.product(foldseek_seq_vocab,
+        for seq_token, struc_token in itertools.product(seq_vocab,
                                                         foldseek_struc_vocab):
             token = seq_token + struc_token
             self.tokens.append(token)
@@ -85,11 +86,93 @@ class SaProtTokenizer:
         seq, foldseek,  combined = parsed_seqs
         return seq, foldseek, combined
 
+class SequenceTokenizer:
+    def __init__(self):
+        self.cls_token = '<cls>'
+        self.pad_token = '<pad>'
+        self.unk_token = '<unk>'
+        self.eos_token = '<eos>'
+        self.mask_token = '<mask>'
+        self.build_vocab()
+    
+    def build_vocab(self):
+        self.tokens = [self.cls_token,
+                       self.pad_token,
+                       self.eos_token,
+                       self.unk_token,
+                       self.mask_token]
+
+        for seq_token in seq_vocab:
+            self.tokens.append(seq_token)
+
+        self.vocab_size = len(self.tokens)
+        self.token2id = {token: idx for idx, token in enumerate(self.tokens)}
+        self.id2token = {idx: token for idx, token in enumerate(self.tokens)}
+
+        self.unk_idx = self.token2id[self.unk_token]
+        self.pad_idx = self.token2id[self.pad_token]
+        self.cls_idx = self.token2id[self.cls_token]
+        self.mask_idx = self.token2id[self.mask_token]
+        self.eos_idx = self.token2id[self.eos_token]
+
+    def __call__(self, pdb_list,
+                 truncation=True,
+                 max_length=max_length,
+                 return_tensors='pt'):
+
+        input_ids = []
+        attention_masks = []
+
+        seqs = [self.extract_aa_seq(pdb) for pdb in pdbs]
+        for seq in seqs:
+            print(seq)
+            print(len(seq))
+            print('---------------------')
+
+    def extract_aa_seq(self, pdb_path, chain_id='A'): 
+        with open(pdb_path, 'r') as pdb_file:
+            for record in SeqIO.parse(pdb_file, 'pdb-atom'):
+                aa_seq = record.seq
+                return aa_seq
+
+
+class FoldSeekTokenizer:
+    def __init__(self):
+        self.cls_token = '<cls>'
+        self.pad_token = '<pad>'
+        self.unk_token = '<unk>'
+        self.eos_token = '<eos>'
+        self.mask_token = '<mask>'
+        self.build_vocab()
+    
+    def build_vocab(self):
+        self.tokens = [self.cls_token,
+                       self.pad_token,
+                       self.eos_token,
+                       self.unk_token,
+                       self.mask_token]
+
+        for struc_token in foldseek_struc_vocab:
+            self.tokens.append(struc_token)
+
+        self.vocab_size = len(self.tokens)
+        self.token2id = {token: idx for idx, token in enumerate(self.tokens)}
+        self.id2token = {idx: token for idx, token in enumerate(self.tokens)}
+
+        self.unk_idx = self.token2id[self.unk_token]
+        self.pad_idx = self.token2id[self.pad_token]
+        self.cls_idx = self.token2id[self.cls_token]
+        self.mask_idx = self.token2id[self.mask_token]
+        self.eos_idx = self.token2id[self.eos_token]
+
+    def __call__(self):
+        pass
+
 if __name__ == "__main__":
     import glob
 
     structures_directory = 'structures/'
     pdbs = glob.glob('%s*.pdb'%structures_directory)
-    tokenizer = SaProtTokenizer()
-    inputs = tokenizer(pdbs, max_length=10)
+    tokenizer = SequenceTokenizer()
+    inputs = tokenizer(pdbs)
     print(inputs)
