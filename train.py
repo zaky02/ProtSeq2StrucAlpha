@@ -1,17 +1,14 @@
 import json
 import torch
+from torch.utils.data import DataLoader, Dataset
 import random
 import glob
 import wandb
 from utils.timer import Timer
-from utils.foldseek import get_foldseek_seq
+from utils.foldseek import get_struc_seq
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
 
 """
-# TO DO: apply masking non-randomly by introducing information
-# about attention values of the words and mask accordingly. Also, 
-# base the masking on pLDDT as found in the SaProt github.
-
 def masking_seq(seq, mask_token, mask_ratio=0.15):
     seq = list(seq)
     seq = [seq[i] + seq[i+1] for i in range(0, len(seq), 2)]
@@ -26,31 +23,62 @@ def masking_seq(seq, mask_token, mask_ratio=0.15):
 masking_seq(seq='AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRr', mask_token='#')
 """
 
-def train_model(seqs,
-                struc_seqs,
-                epochs: int = 10,
-                learning_rate: float = 0.0001,
-                batch_size: int = 10,
+class SeqsDataset(Dataset):
+    def __init__(self, aa_seqs, struc_seqs,
+                 tokenizer_aa_seqs, tokenizer_struc_seqs,
+                 max_len=1024):
+        self.aa_seqs = aa_seqs
+        self.struc_seqs = struc_seqs
+        self.tokenizer_aa_seqs = tokenizer_aa_seqs
+        self.tokenizer_struc_seqs = tokenizer_struc_seqs
+        self.max_len = max_len
+
+    def __len__(self):
+        return len(self.aa_seqs)
+
+    def __getitem__(self, idx):
+        # Tokenize protein sequence of index idx
+        aa_seq = self.aa_seqs[idx]
+        encoded_aa_seq = self.tokenizer_aa_seqs(aa_seq,
+                                                truncation=True,
+                                                padding=True,
+                                                max_len=self.max_len)
+
+        # Tokenize structural sequence of index idx
+        struc_seq = self.struc_seqs[idx]
+        encoded_struc_seq = self.tokenizer_struc_seqs(struc_seq,
+                                                      truncation=True,
+                                                      padding=True,
+                                                      max_len=self.max_len)
+        return {
+            'encoder_input_ids': encoded_aa_seq['input_ids'].squeeze(),
+            'encoder_attention_mask': encoded_aa_seq['attention_mask'].squeeze(),
+            'decoder_input_ids': encoded_struc_seq['input_ids'].squeeze(),
+            'decoder_attention_mask': encoded_struc_seq['attention_mask'].squeeze()
+        }
+
+        
+
+def train_model(model,
+                train_loader,
+                optimizer,
+                criterion,
+                epochs,
+                device='cuda',
                 verbose=False):
     """
     Train the model using the specified hyperparamaters
 
     Args:
-        seqs (list): of protein sequences
-        struc_seqs (list): corresponding foldseek structural sequences
-        epochs: The number of epochs to train the model
-        learning_rate: The learning rate
-        batch_size: The batch size
-    """
-    
-
-    # Tokenize protein sequences
-    tokenizer_seqs = SequenceTokenizer()
-
-    # Tokenize structural sequences
-    tokenizer_foldseek = FoldSeekTokenizer()
-
-    # Split the dataset
+        model (model class ...): ....
+        train_loader (DataLoader): ...
+        optimizer (...): ...
+        criterion (...): ...
+        epochs (int): Number of epochs
+        device (...): ...
+        verbose (bool): ...
+    """    
+    pass
 
 
 def main(confile):
@@ -62,19 +90,34 @@ def main(confile):
     structures_dir = config["data_path"]
     pdbs = glob.glob('%s*.pdb' % structures_dir)
 
-    # Get protein sequence and structural sequence (FoldSeeq)
+    # Get protein sequence and structural sequence (FoldSeeq) from raw data
     foldseek_path = config["foldseek_path"]
-    data = [get_foldseek_seq(foldseek_path, pdb, chains=['A'])['A'] for pdb in pdbs]
-    seqs = [pdb[0] for pdb in data]
-    struc_seqs = [pdb[1] for pdb in data]
+    raw_data = [get_struc_seq(foldseek_path, pdb, chains=['A'])['A'] for pdb in pdbs]
+    aa_seqs = [pdb[0] for pdb in raw_data]
+    struc_seqs = [pdb[1] for pdb in raw_data]
 
-    # Get hyperparamaters
-    get_wandb = config['get_wandb']
+    # Load Dataset
+    tokenizer_aa_seqs = SequenceTokenizer()
+    tokenizer_struc_seqs = FoldSeekTokenizer()
+    dataset = SeqsDataset(aa_seqs, struc_seqs,
+                          tokenizer_aa_seqs, tokenizer_struc_seqs,
+                          max_len=1024)
+
+    # Load DataLoader
+    batch_size = config['batch_size']
+    train_loader =  DataLoader(dataset, batch_size=batch_size, shuffle=True) 
+
+    # Get model hyperparamaters
     epochs = config['epochs']
     learning_rate = config['learning_rate']
-    batch_size = config['batch_size']
+    
+    # Initialize model, optimizer, and loss function
+    #model = 
+    #optimizer = 
+    #criterion = 
 
     # Configure wandb
+    get_wandb = config['get_wandb']
     if get_wandb:
         wandb.init(
             project=config["wandb_project"],
@@ -85,11 +128,12 @@ def main(confile):
     # Train the model
     timer = Timer(autoreset=True)
     timer.start('Training started')
-    train_model(seqs,
-                struc_seqs,
+    train_model(model,
+                train_loader,
+                optimizer,
+                criterion,
                 epochs,
-                learning_rate,
-                batch_size,
+                device='cuda',
                 verbose=False)
     timer.stop('Training ended')
 
