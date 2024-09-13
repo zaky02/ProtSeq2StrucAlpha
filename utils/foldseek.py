@@ -2,8 +2,7 @@
 
 import os
 
-
-def get_foldseek_seq(foldseek,
+def get_struc_seq(foldseek,
                      pdb,
                      chains: list = None,
                      process_id: int = 0) -> dict:
