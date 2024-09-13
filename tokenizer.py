@@ -1,14 +1,14 @@
 import torch
 import itertools
 from Bio import SeqIO
-from utils.foldseek import get_foldseek_seq
+from utils.foldseek import get_struc_seq
 from SaProt.utils.foldseek_util import get_struc_seq
 
 seq_vocab = "ACDEFGHIKLMNPQRSTVWY#"
 foldseek_struc_vocab = "pynwrqhgdlvtmfsaeikc#"
 # max_length refers to aa sequence length no to input length
 # with cls and eos the input max size/length is 1026 (+2)
-max_length = 1024
+max_len = 1024
 
 foldseek_path = '/home/phastos/Programs/mambaforge/envs/ProtSeq2StrucAlpha/lib/python3.10/site-packages/SaProt/bin/foldseek'
 
@@ -47,7 +47,7 @@ class SaProtTokenizer:
     def __call__(self, pdb_list,
                  truncation=True,
                  padding=True,
-                 max_length=max_length,
+                 max_len=max_len,
                  return_tensors='pt'):
     
         input_ids = []
@@ -62,8 +62,8 @@ class SaProtTokenizer:
             print(len(sa_list))
 
             # Truncation startegy for max_length (not longest)
-            if truncation and len(sa_list) > max_length: 
-                sa_list = sa_list[:max_length]
+            if truncation and len(sa_list) > max_len: 
+                sa_list = sa_list[:max_len]
                 longest = len(sa_list)
             
             sa_list = [self.cls_token] + sa_list + [self.eos_token]
@@ -108,34 +108,39 @@ class SequenceTokenizer:
             self.tokens.append(seq_token)
 
         self.vocab_size = len(self.tokens)
-        self.token2id = {token: idx for idx, token in enumerate(self.tokens)}
-        self.id2token = {idx: token for idx, token in enumerate(self.tokens)}
+        self.token2id = {token: id for id, token in enumerate(self.tokens)}
+        self.id2token = {id: token for id, token in enumerate(self.tokens)}
 
-        self.unk_idx = self.token2id[self.unk_token]
-        self.pad_idx = self.token2id[self.pad_token]
-        self.cls_idx = self.token2id[self.cls_token]
-        self.mask_idx = self.token2id[self.mask_token]
-        self.eos_idx = self.token2id[self.eos_token]
+        self.unk_id = self.token2id[self.unk_token]
+        self.pad_id = self.token2id[self.pad_token]
+        self.cls_id = self.token2id[self.cls_token]
+        self.mask_id = self.token2id[self.mask_token]
+        self.eos_id = self.token2id[self.eos_token]
 
-    def __call__(self, pdb_list,
+    def __call__(self, aa_seqs,
                  truncation=True,
                  padding=True,
-                 max_length=max_length,
+                 max_len=max_len,
                  return_tensors='pt'):
+
+        if isinstance(aa_seqs, str):
+            aa_seqs = [aa_seqs]
+        elif isinstance(aa_seqs, list):
+            pass
+        else:
+            raise ValueError('aa_seqs must be either a single\
+                              sequence or a list of sequences')
 
         input_ids = []
         attention_masks = []
-
-        seqs = [self.extract_aa_seq(pdb) for pdb in pdbs]
-        longest = int(max(len(s) for s in seqs)) + 2
+        longest = int(max(len(s) for s in aa_seqs)) + 2
         
-        for seq in seqs:
+        for seq in aa_seqs:
             seq = list(seq)
-            print(len(seq))
             
             # Truncation startegy for max_length (not longest)
-            if truncation and len(seq) > max_length: 
-                seq = seq[:max_length]
+            if truncation and len(seq) > max_len: 
+                seq = seq[:max_len]
                 longest = len(seq)
             
             seq = [self.cls_token] + seq + [self.eos_token]
@@ -181,39 +186,41 @@ class FoldSeekTokenizer:
             self.tokens.append(struc_token)
 
         self.vocab_size = len(self.tokens)
-        self.token2id = {token: idx for idx, token in enumerate(self.tokens)}
-        self.id2token = {idx: token for idx, token in enumerate(self.tokens)}
+        self.token2id = {token: id for id, token in enumerate(self.tokens)}
+        self.id2token = {id: token for id, token in enumerate(self.tokens)}
 
-        self.unk_idx = self.token2id[self.unk_token]
-        self.pad_idx = self.token2id[self.pad_token]
-        self.cls_idx = self.token2id[self.cls_token]
-        self.mask_idx = self.token2id[self.mask_token]
-        self.eos_idx = self.token2id[self.eos_token]
+        self.unk_id = self.token2id[self.unk_token]
+        self.pad_id = self.token2id[self.pad_token]
+        self.cls_id = self.token2id[self.cls_token]
+        self.mask_id = self.token2id[self.mask_token]
+        self.eos_id = self.token2id[self.eos_token]
 
 
-    def __call__(self, pdb_list,
+    def __call__(self, struc_seqs,
                  truncation=True,
                  padding=True,
-                 max_length=max_length,
+                 max_len=max_len,
                  return_tensors='pt'):
-
+ 
+        if isinstance(struc_seqs, str):
+            struc_seqs = [struc_seqs]
+        elif isinstance(struc_seqs, list):
+            pass
+        else:
+            raise ValueError('struc_seqs must be either a single\
+                              sequence or a list of sequences')
+        
         input_ids = []
         attention_masks = []
 
-        seqs = [get_foldseek_seq(foldseek_path, path=pdb, chains=['A']) for pdb in pdbs]
-        for s in seqs:
-            print(s)
-
-        longest = int(max(len(s) for s in seqs)) + 2
-        print(longest)
+        longest = int(max(len(s) for s in struc_seqs)) + 2
         
-        for seq in seqs:
-            seq = seq['A'].lower()
+        for seq in struc_seqs:
             seq = list(seq)
             
             # Truncation startegy for max_length (not longest)
-            if truncation and len(seq) > max_length: 
-                seq = seq[:max_length]
+            if truncation and len(seq) > max_len: 
+                seq = seq[:max_len]
                 longest = len(seq)
             
             seq = [self.cls_token] + seq + [self.eos_token]
@@ -221,7 +228,6 @@ class FoldSeekTokenizer:
             # Padding strategy longest
             if padding and len(seq) < longest:
                 seq = seq + [self.pad_token] * (longest - len(seq))
-                print(seq)
 
             input_id = [self.token2id[token] for token in seq]
             input_ids.append(input_id)
