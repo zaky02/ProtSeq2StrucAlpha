@@ -11,7 +11,7 @@ def unzip_pdb_gz_files(dir):
 
     # Iterate over all files in the dir
     for filename in os.listdir(dir):
-        if filename.endswith('.pdb.gz'):
+        if filename.endswith('.pdb.gz') or filename.endswith('.cif.gz'):
             gz_path = os.path.join(dir, filename)
             pdb_filename = filename[:-3]  # Remove the '.gz' extension
             pdb_path = os.path.join(dir, pdb_filename)
