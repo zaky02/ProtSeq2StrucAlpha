@@ -1,6 +1,6 @@
 import json
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, random_split
 import random
 import glob
 import wandb
@@ -103,9 +103,16 @@ def main(confile):
                           tokenizer_aa_seqs, tokenizer_struc_seqs,
                           max_len=1024)
 
+    # Split Dataset into training and testing
+    test_split = config["test_split"]
+    test_size = int(test_split * len(dataset))
+    train_size = len(dataset) - test_size
+    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+
     # Load DataLoader
     batch_size = config['batch_size']
-    train_loader =  DataLoader(dataset, batch_size=batch_size, shuffle=True) 
+    train_loader =  DataLoader(train_dataset, batch_size=batch_size, shuffle=True) 
+    test_loader =  DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
     # Get model hyperparamaters
     epochs = config['epochs']
@@ -128,13 +135,15 @@ def main(confile):
     # Train the model
     timer = Timer(autoreset=True)
     timer.start('Training started')
-    train_model(model,
-                train_loader,
-                optimizer,
-                criterion,
-                epochs,
-                device='cuda',
-                verbose=False)
+    for epoch in range(epochs):
+        print(f"Epoch {epoch+1}/{epochs}")
+        train_model(model,
+                    train_loader,
+                    optimizer,
+                    criterion,
+                    device='cuda',
+                    verbose=False)
+        #evaluate_model(model, test_loader, criterion, device='cuda', verbose=False)
     timer.stop('Training ended')
 
 if __name__ == "__main__":
