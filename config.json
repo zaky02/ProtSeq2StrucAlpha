@@ -1,10 +1,10 @@
 {
-    "data_path": "structures/",
+    "data_path": "structures/mane_overlap_v4/",
     "foldseek_path": "bin/foldseek",
-    "get_wandb": false,
+    "get_wandb": true,
     "wandb_project": "ProtSeq2StrucAlpha_v0",
     "epochs": 10,
     "learning_rate": 0.0001,
-    "batch_size": 10,
+    "batch_size": 32,
     "test_split": 0.50
 }

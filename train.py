@@ -1,6 +1,7 @@
 import json
 import torch
 from torch.utils.data import DataLoader, Dataset, random_split
+import torch.optim as optim
 import random
 import glob
 import wandb
@@ -58,6 +59,63 @@ class SeqsDataset(Dataset):
         }
 
         
+def evaluate_model(model,
+                   test_loader,
+                   criterion,
+                   device='cuda',
+                   verbose=False):
+    """
+    Evaluate the model on the test dataset with gradient calculation.
+
+    Args:
+        model (torch.nn.Module): The trained model.
+        test_loader (DataLoader): DataLoader for the test dataset.
+        criterion: The loss function.
+        device (str): Device to run the evaluation on ('cuda' or 'cpu').
+        verbose (bool): Whether to print progress.
+
+    Returns:
+        dict: A dictionary containing 'avg_loss' and 'accuracy'.
+    """
+    model.train()  # Ensure the model is in training mode for gradient calculations
+    total_loss = 0.0
+    total_correct = 0
+    total_samples = 0
+
+    for batch in test_loader:
+        
+        input_ids = batch['encoder_input_ids'].to(device)
+        attention_mask = batch['encoder_attention_mask'].to(device)
+        decoder_input_ids = batch['decoder_input_ids'].to(device)
+        decoder_attention_mask = batch['decoder_attention_mask'].to(device)
+
+        # Forward pass
+        outputs = model(input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        decoder_input_ids=decoder_input_ids,
+                        decoder_attention_mask=decoder_attention_mask)
+        
+        # Compute loss
+        loss = criterion(outputs.logits, decoder_input_ids)
+        total_loss += loss.item()
+
+        # Compute accuracy (for classification tasks)
+        _, predicted = torch.max(outputs.logits, dim=-1)
+        total_correct += (predicted == decoder_input_ids).sum().item()
+        total_samples += decoder_input_ids.numel()
+
+        if verbose:
+            print(f"Processed batch with loss: {loss.item():.4f}")
+
+    # Average loss and accuracy over the entire test set
+    avg_loss = total_loss / len(test_loader)
+    accuracy = total_correct / total_samples
+
+    if verbose:
+        print(f"Test Loss: {avg_loss:.4f}, Test Accuracy: {accuracy:.4f}")
+
+    return {"avg_loss": avg_loss, "accuracy": accuracy}
+
 
 def train_model(model,
                 train_loader,
@@ -120,31 +178,43 @@ def main(confile):
     
     # Initialize model, optimizer, and loss function
     #model = 
-    #optimizer = 
-    #criterion = 
-
-    # Configure wandb
-    get_wandb = config['get_wandb']
-    if get_wandb:
-        wandb.init(
-            project=config["wandb_project"],
-            config={"dataset": "sample_DB",
-                    "architecture": "Transformer"}
-        )
-
-    # Train the model
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = 
+    
     timer = Timer(autoreset=True)
     timer.start('Training started')
     for epoch in range(epochs):
         print(f"Epoch {epoch+1}/{epochs}")
+    
+        # Train the model
         train_model(model,
                     train_loader,
                     optimizer,
                     criterion,
                     device='cuda',
                     verbose=False)
-        #evaluate_model(model, test_loader, criterion, device='cuda', verbose=False)
+        
+        # Evaluate the model
+        evaluation_results = evaluate_model(model,
+                                            test_loader,
+                                            criterion,
+                                            device='cuda',
+                                            verbose=False)
+        
+        print(f"Evaluation Results - Loss: {evaluation_results['avg_loss']}, Accuracy: {evaluation_results['accuracy']}")
+        
+        # Log the evaluation results to wandb if applicable
+        get_wandb = config['get_wandb']
+        if get_wandb:
+            wandb.init(project=config["wandb_project"],
+                       config={"dataset": "sample_DB",
+                               "architecture": "Transformer"})
+            wandb.log({"epoch": epoch + 1, 
+                       "loss": evaluation_results['avg_loss'], 
+                       "accuracy": evaluation_results['accuracy']})
+    
     timer.stop('Training ended')
+
 
 if __name__ == "__main__":
     import argparse
