@@ -1,26 +1,18 @@
-import json
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset, random_split
 import torch.optim as optim
 import random
+import json
 import glob
 import wandb
+import numpy as np
+import sys
 from utils.timer import Timer
 from utils.foldseek import get_struc_seq
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
 
-
-def masking_struc_seq(struc_seq, mask_token, mask_ratio=0.15):
-    seq = list(seq)
-    seq = [seq[i] + seq[i+1] for i in range(0, len(seq), 2)]
-    num_to_mask = int(len(seq) * mask_ratio)
-    # randomly select indices from the sequence
-    mask_indices = random.sample(range(int(len(seq)/2)), num_to_mask)
-    mask_indices = [(i*2)+1 for i in mask_indices]
-    for i in mask_indices:
-        seq[i] = seq[i][0] + mask_token
-    return seq
+np.set_printoptions(threshold=sys.maxsize)
 
 class SeqsDataset(Dataset):
     def __init__(self, aa_seqs, struc_seqs):
@@ -115,6 +107,8 @@ def train_model(model,
                 train_loader,
                 optimizer,
                 criterion,
+                tokenizer_struc_seqs,
+                masking_ratio,
                 device='cuda',
                 verbose=False):
     """
@@ -133,8 +127,33 @@ def train_model(model,
 
     total_loss = 0.0
     for batch in train_loader:
-        print(batch)
+        encoder_input_ids = batch['encoder_input_ids'].to(device)
+        encoder_attention_mask = batch['encoder_attention_mask'].to(device)
+        decoder_input_ids = batch['decoder_input_ids'].to(device)
+        decoder_attention_mask = batch['decoder_attention_mask'].to(device)
+        
+        optimizer.zero_grad()
+
+        masked_decoder_input_ids = masking_struc_seqs_ids(decoder_input_ids,
+                                                          tokenizer_struc_seqs,
+                                                          masking_ratio)
+
+        exit()
+
+def masking_struc_seqs_ids(decoder_input_ids, tokenizer_struc_seqs, masking_ratio=0.15):
+    mask_token_id = tokenizer_struc_seqs.mask_id
+    eos_token_id = tokenizer_struc_seqs.eos_id
+
+    masked_decoder_input_ids = decoder_input_ids.clone()
+    for input_id in masked_decoder_input_ids:
+        end_idx = (input_id == eos_token_id).nonzero(as_tuple=True)[0].item()
+        seq_len = end_idx - 1
+        num_elements_to_mask = max(1, int(seq_len * masking_ratio))
+        idxs_to_mask = torch.randperm(seq_len)[:num_elements_to_mask] + 1
+        input_id[idxs_to_mask] = mask_token_id
     
+    return masked_decoder_input_ids
+
 class SimpleNN(nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
         super(SimpleNN, self).__init__()
@@ -205,9 +224,10 @@ def main(confile):
     # Get model hyperparamaters
     epochs = config['epochs']
     learning_rate = config['learning_rate']
+    masking_ratio = config['masking_ratio']
     
     # Initialize model, optimizer, and loss function
-    model = SimpleNN(10, 5, 1)
+    model = SimpleNN(10, 5, 1).to('cuda')
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
     
@@ -221,6 +241,8 @@ def main(confile):
                     train_loader,
                     optimizer,
                     criterion,
+                    tokenizer_struc_seqs,
+                    masking_ratio=masking_ratio,
                     device='cuda',
                     verbose=False)
         exit() 
