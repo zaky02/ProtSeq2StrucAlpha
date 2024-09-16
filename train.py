@@ -1,5 +1,6 @@
 import json
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset, random_split
 import torch.optim as optim
 import random
@@ -9,8 +10,8 @@ from utils.timer import Timer
 from utils.foldseek import get_struc_seq
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
 
-"""
-def masking_seq(seq, mask_token, mask_ratio=0.15):
+
+def masking_struc_seq(struc_seq, mask_token, mask_ratio=0.15):
     seq = list(seq)
     seq = [seq[i] + seq[i+1] for i in range(0, len(seq), 2)]
     num_to_mask = int(len(seq) * mask_ratio)
@@ -21,44 +22,37 @@ def masking_seq(seq, mask_token, mask_ratio=0.15):
         seq[i] = seq[i][0] + mask_token
     return seq
 
-masking_seq(seq='AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRr', mask_token='#')
-"""
-
 class SeqsDataset(Dataset):
-    def __init__(self, aa_seqs, struc_seqs,
-                 tokenizer_aa_seqs, tokenizer_struc_seqs,
-                 max_len=1024):
+    def __init__(self, aa_seqs, struc_seqs):
         self.aa_seqs = aa_seqs
         self.struc_seqs = struc_seqs
-        self.tokenizer_aa_seqs = tokenizer_aa_seqs
-        self.tokenizer_struc_seqs = tokenizer_struc_seqs
-        self.max_len = max_len
 
     def __len__(self):
         return len(self.aa_seqs)
 
     def __getitem__(self, idx):
-        # Tokenize protein sequence of index idx
+        # Return protein and structural sequence pairs without tokenizing
         aa_seq = self.aa_seqs[idx]
-        encoded_aa_seq = self.tokenizer_aa_seqs(aa_seq,
-                                                truncation=True,
-                                                padding=True,
-                                                max_len=self.max_len)
-
-        # Tokenize structural sequence of index idx
         struc_seq = self.struc_seqs[idx]
-        encoded_struc_seq = self.tokenizer_struc_seqs(struc_seq,
-                                                      truncation=True,
-                                                      padding=True,
-                                                      max_len=self.max_len)
-        return {
-            'encoder_input_ids': encoded_aa_seq['input_ids'].squeeze(),
-            'encoder_attention_mask': encoded_aa_seq['attention_mask'].squeeze(),
-            'decoder_input_ids': encoded_struc_seq['input_ids'].squeeze(),
-            'decoder_attention_mask': encoded_struc_seq['attention_mask'].squeeze()
-        }
+        return aa_seq, struc_seq
 
-        
+def collate_fn(batch, tokenizer_aa_seqs, tokenizer_struc_seqs, max_len=1024):
+    aa_seqs = [item[0] for item in batch]
+    struc_seqs = [item[1] for item in batch]
+
+    # Tokenize the protein sequences (encoder input)
+    encoded_aa_seqs = tokenizer_aa_seqs(aa_seqs, max_len=max_len, padding=True, truncation=True)
+
+    # Tokenize the structural sequences (decoder input/output)
+    encoded_struc_seqs = tokenizer_struc_seqs(struc_seqs, max_len=max_len, padding=True, truncation=True)
+
+    return {
+        'encoder_input_ids': encoded_aa_seqs['input_ids'],
+        'encoder_attention_mask': encoded_aa_seqs['attention_mask'],
+        'decoder_input_ids': encoded_struc_seqs['input_ids'],
+        'decoder_attention_mask': encoded_struc_seqs['attention_mask']
+    }
+
 def evaluate_model(model,
                    test_loader,
                    criterion,
@@ -77,7 +71,7 @@ def evaluate_model(model,
     Returns:
         dict: A dictionary containing 'avg_loss' and 'accuracy'.
     """
-    model.train()  # Ensure the model is in training mode for gradient calculations
+    model.eval()
     total_loss = 0.0
     total_correct = 0
     total_samples = 0
@@ -121,7 +115,6 @@ def train_model(model,
                 train_loader,
                 optimizer,
                 criterion,
-                epochs,
                 device='cuda',
                 verbose=False):
     """
@@ -135,8 +128,27 @@ def train_model(model,
         epochs (int): Number of epochs
         device (...): ...
         verbose (bool): ...
-    """    
-    pass
+    """
+    model.train()
+
+    total_loss = 0.0
+    for batch in train_loader:
+        print(batch)
+    
+class SimpleNN(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super(SimpleNN, self).__init__()
+        # Define layers
+        self.fc1 = nn.Linear(input_size, hidden_size)  # First linear layer
+        self.relu = nn.ReLU()                          # Activation function (ReLU)
+        self.fc2 = nn.Linear(hidden_size, output_size) # Second linear layer
+    
+    def forward(self, x):
+        # Forward pass
+        out = self.fc1(x)
+        out = self.relu(out)
+        out = self.fc2(out)
+        return out
 
 
 def main(confile):
@@ -144,42 +156,60 @@ def main(confile):
     with open(confile, 'r') as f:
         config = json.load(f)
 
+    verbose = config['verbose']
+
     # Get the data
     structures_dir = config["data_path"]
     pdbs = glob.glob('%s*.pdb' % structures_dir)
+    pdbs = pdbs[:100]
 
     # Get protein sequence and structural sequence (FoldSeeq) from raw data
     foldseek_path = config["foldseek_path"]
     raw_data = [get_struc_seq(foldseek_path, pdb, chains=['A'])['A'] for pdb in pdbs]
     aa_seqs = [pdb[0] for pdb in raw_data]
     struc_seqs = [pdb[1] for pdb in raw_data]
+    if verbose:
+        print('- Total amount of structres given %d' %len(aa_seqs))
 
     # Load Dataset
     tokenizer_aa_seqs = SequenceTokenizer()
     tokenizer_struc_seqs = FoldSeekTokenizer()
-    dataset = SeqsDataset(aa_seqs, struc_seqs,
-                          tokenizer_aa_seqs, tokenizer_struc_seqs,
-                          max_len=1024)
+    dataset = SeqsDataset(aa_seqs, struc_seqs)
 
     # Split Dataset into training and testing
     test_split = config["test_split"]
     test_size = int(test_split * len(dataset))
     train_size = len(dataset) - test_size
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-
+    if verbose:
+        print('- Total amount of tructures in training dataset %d' % len(train_dataset))
+        print('- Total amount of structres in testing dataset %d' % len(test_dataset))
+    
     # Load DataLoader
     batch_size = config['batch_size']
-    train_loader =  DataLoader(train_dataset, batch_size=batch_size, shuffle=True) 
-    test_loader =  DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+    train_loader =  DataLoader(train_dataset,
+                               batch_size=batch_size,
+                               shuffle=True,
+                               collate_fn=lambda batch: collate_fn(batch,
+                                                                   tokenizer_aa_seqs,
+                                                                   tokenizer_struc_seqs,
+                                                                   max_len=1024)) 
+    test_loader =  DataLoader(test_dataset,
+                              batch_size=batch_size,
+                              shuffle=True,
+                              collate_fn=lambda batch: collate_fn(batch,
+                                                                  tokenizer_aa_seqs,
+                                                                  tokenizer_struc_seqs,
+                                                                  max_len=1024))
 
     # Get model hyperparamaters
     epochs = config['epochs']
     learning_rate = config['learning_rate']
     
     # Initialize model, optimizer, and loss function
-    #model = 
+    model = SimpleNN(10, 5, 1)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = 
+    criterion = nn.CrossEntropyLoss(ignore_index=-100)
     
     timer = Timer(autoreset=True)
     timer.start('Training started')
@@ -193,7 +223,7 @@ def main(confile):
                     criterion,
                     device='cuda',
                     verbose=False)
-        
+        exit() 
         # Evaluate the model
         evaluation_results = evaluate_model(model,
                                             test_loader,
