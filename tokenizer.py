@@ -4,8 +4,8 @@ from Bio import SeqIO
 from utils.foldseek import get_struc_seq
 from SaProt.utils.foldseek_util import get_struc_seq
 
-seq_vocab = "ACDEFGHIKLMNPQRSTVWY#"
-foldseek_struc_vocab = "pynwrqhgdlvtmfsaeikc#"
+seq_vocab = "ACDEFGHIKLMNPQRSTVWY"
+foldseek_struc_vocab = "pynwrqhgdlvtmfsaeikc"
 # max_length refers to aa sequence length no to input length
 # with cls and eos the input max size/length is 1026 (+2)
 max_len = 1024
