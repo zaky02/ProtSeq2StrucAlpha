@@ -16,8 +16,8 @@ class SaProtTokenizer:
     def __init__(self):
         self.cls_token = '<cls>'
         self.pad_token = '<pad>'
-        self.unk_token = '<unk>'
         self.eos_token = '<eos>'
+        self.unk_token = '<unk>'
         self.mask_token = '<mask>'
         self.build_vocab()
 
@@ -92,8 +92,8 @@ class SequenceTokenizer:
     def __init__(self):
         self.cls_token = '<cls>'
         self.pad_token = '<pad>'
-        self.unk_token = '<unk>'
         self.eos_token = '<eos>'
+        self.unk_token = '<unk>'
         self.mask_token = '<mask>'
         self.build_vocab()
     
@@ -169,8 +169,8 @@ class FoldSeekTokenizer:
     def __init__(self):
         self.cls_token = '<cls>'
         self.pad_token = '<pad>'
-        self.unk_token = '<unk>'
         self.eos_token = '<eos>'
+        self.unk_token = '<unk>'
         self.mask_token = '<mask>'
         self.build_vocab()
     
@@ -211,12 +211,11 @@ class FoldSeekTokenizer:
         
         input_ids = []
         attention_masks = []
-
+        
         longest = min(int(max(len(s) for s in struc_seqs)), max_len)
         
         for seq in struc_seqs:
             seq = list(seq)
-            
             # Truncation startegy for max_length (not longest)
             if truncation and len(seq) > max_len: 
                 seq = seq[:max_len]
