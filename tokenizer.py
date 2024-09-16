@@ -133,7 +133,7 @@ class SequenceTokenizer:
 
         input_ids = []
         attention_masks = []
-        longest = int(max(len(s) for s in aa_seqs)) + 2
+        longest = min(int(max(len(s) for s in aa_seqs)), max_len)
         
         for seq in aa_seqs:
             seq = list(seq)
@@ -141,13 +141,12 @@ class SequenceTokenizer:
             # Truncation startegy for max_length (not longest)
             if truncation and len(seq) > max_len: 
                 seq = seq[:max_len]
-                longest = len(seq)
             
             seq = [self.cls_token] + seq + [self.eos_token]
             
             # Padding strategy longest
             if padding and len(seq) < longest:
-                seq = seq + [self.pad_token] * (longest - len(seq))
+                seq = seq + [self.pad_token] * (longest - len(seq) + 2)
             
             input_id = [self.token2id[token] for token in seq]
             input_ids.append(input_id)
@@ -213,7 +212,7 @@ class FoldSeekTokenizer:
         input_ids = []
         attention_masks = []
 
-        longest = int(max(len(s) for s in struc_seqs)) + 2
+        longest = min(int(max(len(s) for s in struc_seqs)), max_len)
         
         for seq in struc_seqs:
             seq = list(seq)
@@ -221,13 +220,12 @@ class FoldSeekTokenizer:
             # Truncation startegy for max_length (not longest)
             if truncation and len(seq) > max_len: 
                 seq = seq[:max_len]
-                longest = len(seq)
             
             seq = [self.cls_token] + seq + [self.eos_token]
             
             # Padding strategy longest
             if padding and len(seq) < longest:
-                seq = seq + [self.pad_token] * (longest - len(seq))
+                seq = seq + [self.pad_token] * (longest - len(seq) + 2)
 
             input_id = [self.token2id[token] for token in seq]
             input_ids.append(input_id)
