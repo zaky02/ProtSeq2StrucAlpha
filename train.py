@@ -8,6 +8,7 @@ import glob
 import wandb
 import numpy as np
 import sys
+from model import TransformerModel
 from utils.timer import Timer
 from utils.foldseek import get_struc_seq
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
@@ -45,63 +46,6 @@ def collate_fn(batch, tokenizer_aa_seqs, tokenizer_struc_seqs, max_len=1024):
         'decoder_attention_mask': encoded_struc_seqs['attention_mask']
     }
 
-def evaluate_model(model,
-                   test_loader,
-                   criterion,
-                   device='cuda',
-                   verbose=False):
-    """
-    Evaluate the model on the test dataset with gradient calculation.
-
-    Args:
-        model (torch.nn.Module): The trained model.
-        test_loader (DataLoader): DataLoader for the test dataset.
-        criterion: The loss function.
-        device (str): Device to run the evaluation on ('cuda' or 'cpu').
-        verbose (bool): Whether to print progress.
-
-    Returns:
-        dict: A dictionary containing 'avg_loss' and 'accuracy'.
-    """
-    model.eval()
-    total_loss = 0.0
-    total_correct = 0
-    total_samples = 0
-
-    for batch in test_loader:
-        
-        input_ids = batch['encoder_input_ids'].to(device)
-        attention_mask = batch['encoder_attention_mask'].to(device)
-        decoder_input_ids = batch['decoder_input_ids'].to(device)
-        decoder_attention_mask = batch['decoder_attention_mask'].to(device)
-
-        # Forward pass
-        outputs = model(input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        decoder_input_ids=decoder_input_ids,
-                        decoder_attention_mask=decoder_attention_mask)
-        
-        # Compute loss
-        loss = criterion(outputs.logits, decoder_input_ids)
-        total_loss += loss.item()
-
-        # Compute accuracy (for classification tasks)
-        _, predicted = torch.max(outputs.logits, dim=-1)
-        total_correct += (predicted == decoder_input_ids).sum().item()
-        total_samples += decoder_input_ids.numel()
-
-        if verbose:
-            print(f"Processed batch with loss: {loss.item():.4f}")
-
-    # Average loss and accuracy over the entire test set
-    avg_loss = total_loss / len(test_loader)
-    accuracy = total_correct / total_samples
-
-    if verbose:
-        print(f"Test Loss: {avg_loss:.4f}, Test Accuracy: {accuracy:.4f}")
-
-    return {"avg_loss": avg_loss, "accuracy": accuracy}
-
 
 def train_model(model,
                 train_loader,
@@ -137,8 +81,27 @@ def train_model(model,
         masked_decoder_input_ids = masking_struc_seqs_ids(decoder_input_ids,
                                                           tokenizer_struc_seqs,
                                                           masking_ratio)
+        # Forward pass through the model
+        outputs = model(encoder_input=encoder_input_ids,
+                        decoder_input=masked_decoder_input_ids,
+                        encoder_mask=encoder_attention_mask,
+                        decoder_mask=decoder_attention_mask)
+        
+        # Compute the loss
+        exit() 
+        #logits = outputs
+        loss = criterion(logits.view(-1, logits.size(-1)), decoder_input_ids.view(-1))
+        loss.backward()
+        optimizer.step()
 
-        exit()
+        total_loss += loss.item()
+        
+        if verbose:
+            print(f"Batch Loss: {loss.item():.4f}")
+
+    avg_loss = total_loss / len(train_loader)
+    print(f"Training Loss: {avg_loss:.4f}")
+    exit()
 
 def masking_struc_seqs_ids(decoder_input_ids, tokenizer_struc_seqs, masking_ratio=0.15):
     mask_token_id = tokenizer_struc_seqs.mask_id
@@ -154,21 +117,55 @@ def masking_struc_seqs_ids(decoder_input_ids, tokenizer_struc_seqs, masking_rati
     
     return masked_decoder_input_ids
 
-class SimpleNN(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size):
-        super(SimpleNN, self).__init__()
-        # Define layers
-        self.fc1 = nn.Linear(input_size, hidden_size)  # First linear layer
-        self.relu = nn.ReLU()                          # Activation function (ReLU)
-        self.fc2 = nn.Linear(hidden_size, output_size) # Second linear layer
-    
-    def forward(self, x):
-        # Forward pass
-        out = self.fc1(x)
-        out = self.relu(out)
-        out = self.fc2(out)
-        return out
 
+def evaluate_model(model,
+                   test_loader,
+                   criterion,
+                   device='cuda',
+                   verbose=False):
+    """
+    Evaluate the model on the test dataset.
+    """
+    model.eval()
+    total_loss = 0.0
+    total_correct = 0
+    total_samples = 0
+
+    with torch.no_grad():
+        for batch in test_loader:
+            encoder_input_ids = batch['encoder_input_ids'].to(device)
+            encoder_attention_mask = batch['encoder_attention_mask'].to(device)
+            decoder_input_ids = batch['decoder_input_ids'].to(device)
+            decoder_attention_mask = batch['decoder_attention_mask'].to(device)
+
+            # Forward pass
+            logits = model(encoder_input=encoder_input_ids,
+                           decoder_input=decoder_input_ids,
+                           encoder_mask=encoder_attention_mask,
+                           decoder_mask=decoder_attention_mask,
+                           memory_mask=None,
+                           encoder_key_padding_mask=None,
+                           decoder_key_padding_mask=None)
+            
+            # Compute loss
+            loss = criterion(logits.view(-1, logits.size(-1)), decoder_input_ids.view(-1))
+            total_loss += loss.item()
+
+            # Compute accuracy
+            _, predicted = torch.max(logits, dim=-1)
+            total_correct += (predicted == decoder_input_ids).sum().item()
+            total_samples += decoder_input_ids.numel()
+
+            if verbose:
+                print(f"Processed batch with loss: {loss.item():.4f}")
+
+    avg_loss = total_loss / len(test_loader)
+    accuracy = total_correct / total_samples
+
+    if verbose:
+        print(f"Test Loss: {avg_loss:.4f}, Test Accuracy: {accuracy:.4f}")
+
+    return {"avg_loss": avg_loss, "accuracy": accuracy}
 
 def main(confile):
     
@@ -206,30 +203,46 @@ def main(confile):
     
     # Load DataLoader
     batch_size = config['batch_size']
+    max_len = config['max_len']
     train_loader =  DataLoader(train_dataset,
                                batch_size=batch_size,
                                shuffle=True,
                                collate_fn=lambda batch: collate_fn(batch,
                                                                    tokenizer_aa_seqs,
                                                                    tokenizer_struc_seqs,
-                                                                   max_len=1024)) 
+                                                                   max_len=max_len)) 
     test_loader =  DataLoader(test_dataset,
                               batch_size=batch_size,
                               shuffle=True,
                               collate_fn=lambda batch: collate_fn(batch,
                                                                   tokenizer_aa_seqs,
                                                                   tokenizer_struc_seqs,
-                                                                  max_len=1024))
+                                                                  max_len=max_len))
 
     # Get model hyperparamaters
     epochs = config['epochs']
     learning_rate = config['learning_rate']
     masking_ratio = config['masking_ratio']
+    dim_model = config['dim_model']
+    num_heads = config['num_heads']
+    num_layers = config['num_layers']
+    ff_hidden_layer = config['ff_hidden_layer']
+    dropout = config['dropout']
     
     # Initialize model, optimizer, and loss function
-    model = SimpleNN(10, 5, 1).to('cuda')
+    model = TransformerModel(input_dim=tokenizer_aa_seqs.vocab_size,
+                             output_dim=tokenizer_struc_seqs.vocab_size,
+                             max_len=max_len,
+                             dim_model=dim_model,
+                             num_heads=num_heads,
+                             num_layers=num_layers,
+                             ff_hidden_layer=ff_hidden_layer,
+                             dropout=dropout,
+                             verbose=verbose).to('cuda')
+    
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
+    exit()
     
     timer = Timer(autoreset=True)
     timer.start('Training started')
@@ -244,14 +257,14 @@ def main(confile):
                     tokenizer_struc_seqs,
                     masking_ratio=masking_ratio,
                     device='cuda',
-                    verbose=False)
+                    verbose=verbose)
         exit() 
         # Evaluate the model
         evaluation_results = evaluate_model(model,
                                             test_loader,
                                             criterion,
                                             device='cuda',
-                                            verbose=False)
+                                            verbose=verbose)
         
         print(f"Evaluation Results - Loss: {evaluation_results['avg_loss']}, Accuracy: {evaluation_results['accuracy']}")
         
