@@ -8,7 +8,6 @@ seq_vocab = "ACDEFGHIKLMNPQRSTVWY"
 foldseek_struc_vocab = "pynwrqhgdlvtmfsaeikc"
 # max_length refers to aa sequence length no to input length
 # with cls and eos the input max size/length is 1026 (+2)
-max_len = 1024
 
 foldseek_path = '/home/phastos/Programs/mambaforge/envs/ProtSeq2StrucAlpha/lib/python3.10/site-packages/SaProt/bin/foldseek'
 
