@@ -8,5 +8,10 @@
     "batch_size": 10,
     "test_split": 0.20,
     "masking_ratio": 0.15,
-    "verbose": true
+    "verbose": true,
+    "d_model": 512,
+    "nhead": 8,
+    "num_layers": 6,
+    "dim_ff": 2048,
+    "dropout": 0.1
 }
