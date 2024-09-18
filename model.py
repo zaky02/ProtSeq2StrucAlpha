@@ -56,7 +56,7 @@ class Encoder(nn.Module):
         
         super(Encoder, self).__init__()
         
-        self.embedding = nn.Embedding(input_dim, dim_model)
+        self.embedding_encoder = nn.Embedding(input_dim, dim_model)
         self.pos_encoder = PositionalEncoding(dim_model, max_len)
         
         encoder_layer = nn.TransformerEncoderLayer(dim_model, num_heads,
@@ -69,7 +69,7 @@ class Encoder(nn.Module):
                 encoder_mask=None,
                 encoder_key_padding_mask=None):
         # Embedding () and Positional Encoding
-        encoder_emb = self.embedding(encoder_input) * torch.sqrt(torch.tensor(self.embedding.embedding_dim, dtype=torch.float32)).to(encoder_input.device)
+        encoder_emb = self.embedding_encoder(encoder_input) * torch.sqrt(torch.tensor(self.embedding.embedding_dim, dtype=torch.float32)).to(encoder_input.device)
         encoder_emb = self.pos_encoder(encoder_emb)
 
         # Encoder forward pass
@@ -85,7 +85,7 @@ class Decoder(nn.Module):
         
         super(Decoder, self).__init__()
         
-        self.embedding = nn.Embedding(output_dim, dim_model)
+        self.embedding_decoder = nn.Embedding(output_dim, dim_model)
         self.pos_decoder = PositionalEncoding(dim_model, max_len)
 
         decoder_layer = nn.TransformerDecoderLayer(dim_model,
@@ -98,8 +98,10 @@ class Decoder(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
 
     
-    def forward(self, decoder_input, memory, decoder_mask=None, memory_mask=None,
-                decoder_key_padding_mask=None, memory_key_padding_mask=None):
+    def forward(self, decoder_input, memory,
+                decoder_mask=None, memory_mask=None,
+                decoder_key_padding_mask=None,
+                memory_key_padding_mask=None):
         
         # Ensure tensor shapes are correct
         #print(f"decoder_input shape: {decoder_input.shape}")
@@ -110,7 +112,7 @@ class Decoder(nn.Module):
         #print(f"memory_key_padding_mask shape: {memory_key_padding_mask.shape if memory_key_padding_mask is not None else None}")
         
         # Embedding and Positional Encoding
-        decoder_emb = self.embedding(decoder_input) * torch.sqrt(torch.tensor(self.embedding.embedding_dim, dtype=torch.float32)).to(decoder_input.device)
+        decoder_emb = self.embedding_decoder(decoder_input) * torch.sqrt(torch.tensor(self.embedding.embedding_dim, dtype=torch.float32)).to(decoder_input.device)
         decoder_emb = self.pos_decoder(decoder_emb)
 
         # Decoder forward pass
@@ -129,15 +131,19 @@ class Decoder(nn.Module):
 
 class TransformerModel(nn.Module):
     def __init__(self, input_dim, output_dim, max_len, dim_model, num_heads,
-                 num_layers, ff_hidden_layers, dropout, verbose=False):
+                 num_layers, ff_hidden_layer, dropout, verbose=False):
         
         super(TransformerModel, self).__init__()
 
-        self.encoder = Encoder(input_dim, max_len, dim_model, num_heads,
-                               num_layers, ff_hidden_layer, dropout)
+        self.encoder_block = Encoder(input_dim, max_len,
+                                     dim_model, num_heads,
+                                     num_layers, ff_hidden_layer,
+                                     dropout)
 
-        self.decoder = Decoder(output_dim, max_len, dim_model, num_heads,
-                               num_layers, ff_hidden_layer, dropout)
+        self.decoder_block = Decoder(output_dim, max_len,
+                                     dim_model, num_heads,
+                                     num_layers, ff_hidden_layer,
+                                     dropout)
     
     def forward(self, encoder_input, decoder_input,
                 encoder_mask=None, decoder_mask=None,
@@ -145,16 +151,15 @@ class TransformerModel(nn.Module):
                 decoder_key_padding_mask=None):
         
         # Encoder pass
-        memory = self.encoder(encoder_input,
-                              encoder_mask=encoder_mask,
-                              encoder_key_padding_mask=encoder_key_padding_mask)
+        memory = self.encoder_block(encoder_input,
+                                    encoder_mask=encoder_mask,
+                                    encoder_key_padding_mask=encoder_key_padding_mask)
         
         # Decoder pass
-        output = self.decoder(decoder_input,
-                              memory,
-                              decoder_mask=decoder_mask,
-                              memory_mask=memory_mask,
-                              decoder_key_padding_mask=decoder_key_padding_mask,
-                              memory_key_padding_mask=encoder_key_padding_mask)
+        output = self.decoder_block(decoder_input,memory,
+                                    decoder_mask=decoder_mask,
+                                    memory_mask=memory_mask,
+                                    decoder_key_padding_mask=decoder_key_padding_mask,
+                                    memory_key_padding_mask=encoder_key_padding_mask)
         return output
 
