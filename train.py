@@ -82,31 +82,41 @@ def train_model(model,
                                                           tokenizer_struc_seqs,
                                                           masking_ratio)
         # Forward pass through the model
-        outputs = model(encoder_input=encoder_input_ids,
+        logits = model(encoder_input=encoder_input_ids,
                         decoder_input=masked_decoder_input_ids,
                         encoder_padding_mask=encoder_attention_mask,
                         decoder_padding_mask=decoder_attention_mask)
         
-        # Compute the loss
-        print(outputs)
-        exit()
-
-        logits = outputs
         print(logits)
-        print(logits.view(-1, logits.size(-1)))
-        print(decoder_input_ids.view(-1))
-        exit()
-        loss = criterion(logits.view(-1, logits.size(-1)), decoder_input_ids.view(-1))
+        
+        # Get masked labels
+        masked_labels = decoder_input_ids.clone()
+        mask = masked_decoder_input_ids.clone()
+        mask_id = tokenizer_struc_seqs.mask_id
+        mask = (mask == mask_id)
+        masked_labels[~mask] = -100
+        # Flatten logits first two dimensions (concatenate seqs from batch)
+        logits = logits.view(-1, logits.size(-1)) 
+        # Flatten masked_labels dimensions (concatenate seqs from batch)
+        masked_labels = masked_labels.view(-1)
+        
+        # Compute batch loss
+        loss = criterion(logits, masked_labels)
+        print(loss)
+        
+        # Backward pass and optimization
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item()
         
         if verbose:
-            print(f"Batch Loss: {loss.item():.4f}")
-
+            print(f"Training Average Batch Loss: {loss.item():.4f}")
+        exit()
+    
     avg_loss = total_loss / len(train_loader)
-    print(f"Training Loss: {avg_loss:.4f}")
+    print(f"Training Average Loss between Batches: {avg_loss:.4f}")
+    print(f"Total Training Loss between Batches: {total_loss:.4f}")
     exit()
 
 def masking_struc_seqs_ids(decoder_input_ids, tokenizer_struc_seqs, masking_ratio=0.15):
@@ -255,7 +265,7 @@ def main(confile):
                 - dropout %f\n' % (max_len, dim_model, num_heads,
                                    num_layers, ff_hidden_layer, dropout))
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.CrossEntropyLoss(ignore_index=-100)
+    criterion = nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
     
     timer = Timer(autoreset=True)
     timer.start('Training started')
