@@ -84,12 +84,18 @@ def train_model(model,
         # Forward pass through the model
         outputs = model(encoder_input=encoder_input_ids,
                         decoder_input=masked_decoder_input_ids,
-                        encoder_mask=encoder_attention_mask,
-                        decoder_mask=decoder_attention_mask)
+                        encoder_padding_mask=encoder_attention_mask,
+                        decoder_padding_mask=decoder_attention_mask)
         
         # Compute the loss
-        exit() 
-        #logits = outputs
+        print(outputs)
+        exit()
+
+        logits = outputs
+        print(logits)
+        print(logits.view(-1, logits.size(-1)))
+        print(decoder_input_ids.view(-1))
+        exit()
         loss = criterion(logits.view(-1, logits.size(-1)), decoder_input_ids.view(-1))
         loss.backward()
         optimizer.step()
@@ -144,8 +150,8 @@ def evaluate_model(model,
                            encoder_mask=encoder_attention_mask,
                            decoder_mask=decoder_attention_mask,
                            memory_mask=None,
-                           encoder_key_padding_mask=None,
-                           decoder_key_padding_mask=None)
+                           encoder_padding_mask=None,
+                           decoder_padding_mask=None)
             
             # Compute loss
             loss = criterion(logits.view(-1, logits.size(-1)), decoder_input_ids.view(-1))
@@ -239,10 +245,17 @@ def main(confile):
                              ff_hidden_layer=ff_hidden_layer,
                              dropout=dropout,
                              verbose=verbose).to('cuda')
-    
+    if verbose:
+        print('- TransformerModel initialized with\n \
+                - max_len %d\n \
+                - dim_model %d\n \
+                - num_heads %d\n \
+                - num_layers %d\n \
+                - ff_hidden_layer %d\n \
+                - dropout %f\n' % (max_len, dim_model, num_heads,
+                                   num_layers, ff_hidden_layer, dropout))
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
-    exit()
     
     timer = Timer(autoreset=True)
     timer.start('Training started')
@@ -285,7 +298,10 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('--config', type=str, default='config.json', help='Configuration file')
+    parser.add_argument('--config', type=str,
+                        default='config.json',
+                        help='Configuration file',
+                        required=True)
     args = parser.parse_args()
 
     confile = args.config
