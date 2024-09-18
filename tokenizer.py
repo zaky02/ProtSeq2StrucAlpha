@@ -7,7 +7,6 @@ from SaProt.utils.foldseek_util import get_struc_seq
 seq_vocab = "ACDEFGHIKLMNPQRSTVWY"
 foldseek_struc_vocab = "pynwrqhgdlvtmfsaeikc"
 # max_length refers to aa sequence length no to input length
-# with cls and eos the input max size/length is 1026 (+2)
 
 foldseek_path = '/home/phastos/Programs/mambaforge/envs/ProtSeq2StrucAlpha/lib/python3.10/site-packages/SaProt/bin/foldseek'
 
@@ -44,9 +43,9 @@ class SaProtTokenizer:
 
 
     def __call__(self, pdb_list,
+                 max_len=1024,
                  truncation=True,
                  padding=True,
-                 max_len=max_len,
                  return_tensors='pt'):
     
         input_ids = []
@@ -117,9 +116,9 @@ class SequenceTokenizer:
         self.eos_id = self.token2id[self.eos_token]
 
     def __call__(self, aa_seqs,
+                 max_len=1024,
                  truncation=True,
                  padding=True,
-                 max_len=max_len,
                  return_tensors='pt'):
 
         if isinstance(aa_seqs, str):
@@ -144,6 +143,7 @@ class SequenceTokenizer:
             seq = [self.cls_token] + seq + [self.eos_token]
             
             # Padding strategy longest
+            # with cls and eos the input length is len(seq)+2
             if padding and len(seq) < longest:
                 seq = seq + [self.pad_token] * (longest - len(seq) + 2)
             
@@ -195,9 +195,9 @@ class FoldSeekTokenizer:
 
 
     def __call__(self, struc_seqs,
+                 max_len=1024,
                  truncation=True,
                  padding=True,
-                 max_len=max_len,
                  return_tensors='pt'):
  
         if isinstance(struc_seqs, str):
@@ -222,6 +222,7 @@ class FoldSeekTokenizer:
             seq = [self.cls_token] + seq + [self.eos_token]
             
             # Padding strategy longest
+            # with cls and eos the input length is len(seq)+2
             if padding and len(seq) < longest:
                 seq = seq + [self.pad_token] * (longest - len(seq) + 2)
 
@@ -242,17 +243,19 @@ if __name__ == "__main__":
     structures_directory = 'structures/'
     pdbs = glob.glob('%s*.pdb'%structures_directory)
     
+    max_len = 1024
+
     # SaProt tokenizer
     tokenizer_sa = SaProtTokenizer()
-    inputs_sa = tokenizer_sa(pdbs)
+    inputs_sa = tokenizer_sa(pdbs, max_len)
     print(inputs_sa)
 
     # ESM tokenizer
     tokenizer_seq = SequenceTokenizer()
-    inputs_seq = tokenizer_seq(pdbs)
+    inputs_seq = tokenizer_seq(pdbs, max_len)
     print(inputs_seq)
 
     # FoldSeek tokenizer
     tokenizer_foldseek = FoldSeekTokenizer()
-    inputs_foldseek = tokenizer_foldseek(pdbs)
+    inputs_foldseek = tokenizer_foldseek(pdbs, max_len)
     print(inputs_foldseek)
