@@ -125,7 +125,7 @@ class Decoder(nn.Module):
 
         self.decoder = nn.TransformerDecoder(decoder_layer, num_layers)
         self.fc_out = nn.Linear(dim_model, output_dim)
-        self.softmax = nn.Softmax(dim=-1)
+        #self.softmax = nn.Softmax(dim=-1)
 
     
     def forward(self, decoder_input, memory,
@@ -170,17 +170,12 @@ class Decoder(nn.Module):
             print(f"decoder_output shape: {output.shape}")
         
         # Linear output
-        output = self.fc_out(output.transpose(0,1))
+        logits = self.fc_out(output.transpose(0,1))
         
         if self.verbose:
-            print(f"fc_output shape: {output.shape}")
+            print(f"fc_output shape: {logits.shape}")
 
-        output = self.softmax(output)
-        
-        if self.verbose:
-            print(f"softmax_output shape: {output.shape}")
-
-        return output
+        return logits
 
 
 class TransformerModel(nn.Module):
