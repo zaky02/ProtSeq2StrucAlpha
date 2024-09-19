@@ -8,6 +8,7 @@
     "batch_size": 10,
     "test_split": 0.20,
     "masking_ratio": 0.15,
+    "epsilon": 1e-15,
     "verbose": true,
     "dim_model": 512,
     "num_heads": 4,
