@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset, random_split
 import torch.optim as optim
+from torchinfo import summary
 import random
 import json
 import glob
@@ -13,7 +14,9 @@ from utils.timer import Timer
 from utils.foldseek import get_struc_seq
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
 
-np.set_printoptions(threshold=sys.maxsize)
+torch.manual_seed(1234)
+
+np.set_printoptions(threshold=999999999)
 
 class SeqsDataset(Dataset):
     def __init__(self, aa_seqs, struc_seqs):
@@ -53,6 +56,7 @@ def train_model(model,
                 criterion,
                 tokenizer_struc_seqs,
                 masking_ratio,
+                epsilon,
                 device='cuda',
                 verbose=False):
     """
@@ -68,7 +72,7 @@ def train_model(model,
         verbose (bool): ...
     """
     model.train()
-
+    
     total_loss = 0.0
     for batch in train_loader:
         encoder_input_ids = batch['encoder_input_ids'].to(device)
@@ -86,23 +90,26 @@ def train_model(model,
                         decoder_input=masked_decoder_input_ids,
                         encoder_padding_mask=encoder_attention_mask,
                         decoder_padding_mask=decoder_attention_mask)
-        
+
         print(logits)
-        
+
         # Get masked labels
         masked_labels = decoder_input_ids.clone()
         mask = masked_decoder_input_ids.clone()
         mask_id = tokenizer_struc_seqs.mask_id
         mask = (mask == mask_id)
         masked_labels[~mask] = -100
+
         # Flatten logits first two dimensions (concatenate seqs from batch)
-        logits = logits.view(-1, logits.size(-1)) 
+        logits = logits.view(-1, logits.size(-1))
+        # Adding an epsilon value to the logits in order to avoid divergence
+        logits = logits / (torch.max(logits, dim=-1, keepdim=True)[0] + epsilon)
+
         # Flatten masked_labels dimensions (concatenate seqs from batch)
         masked_labels = masked_labels.view(-1)
         
         # Compute batch loss
         loss = criterion(logits, masked_labels)
-        print(loss)
         
         # Backward pass and optimization
         loss.backward()
@@ -119,7 +126,10 @@ def train_model(model,
     print(f"Total Training Loss between Batches: {total_loss:.4f}")
     exit()
 
-def masking_struc_seqs_ids(decoder_input_ids, tokenizer_struc_seqs, masking_ratio=0.15):
+def masking_struc_seqs_ids(decoder_input_ids,
+                           tokenizer_struc_seqs,
+                           masking_ratio=0.15):
+
     mask_token_id = tokenizer_struc_seqs.mask_id
     eos_token_id = tokenizer_struc_seqs.eos_id
 
@@ -239,6 +249,7 @@ def main(confile):
     epochs = config['epochs']
     learning_rate = config['learning_rate']
     masking_ratio = config['masking_ratio']
+    epsilon = config["epsilon"]
     dim_model = config['dim_model']
     num_heads = config['num_heads']
     num_layers = config['num_layers']
@@ -255,6 +266,9 @@ def main(confile):
                              ff_hidden_layer=ff_hidden_layer,
                              dropout=dropout,
                              verbose=verbose).to('cuda')
+    if verbose:
+        summary(model)
+
     if verbose:
         print('- TransformerModel initialized with\n \
                 - max_len %d\n \
@@ -279,6 +293,7 @@ def main(confile):
                     criterion,
                     tokenizer_struc_seqs,
                     masking_ratio=masking_ratio,
+                    epsilon=epsilon,
                     device='cuda',
                     verbose=verbose)
         exit() 
