@@ -133,7 +133,11 @@ class SequenceTokenizer:
         attention_masks = []
         longest = min(int(max(len(s) for s in aa_seqs)), max_len)
         
+        print('\nTokenizing amino acid sequences:')
+        
         for seq in aa_seqs:
+            print(f'- ', {seq})
+            print(len(seq))
             seq = list(seq)
             
             # Truncation startegy for max_length (not longest)
@@ -213,7 +217,11 @@ class FoldSeekTokenizer:
         
         longest = min(int(max(len(s) for s in struc_seqs)), max_len)
         
+        print('\nTokenizing structural sequences:')
+        
         for seq in struc_seqs:
+            print(f'- ', {seq})
+            print(len(seq))
             seq = list(seq)
             # Truncation startegy for max_length (not longest)
             if truncation and len(seq) > max_len: 
