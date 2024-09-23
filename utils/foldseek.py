@@ -3,9 +3,9 @@
 import os
 
 def get_struc_seq(foldseek,
-                     pdb,
-                     chains: list = None,
-                     process_id: int = 0) -> dict:
+                  pdb,
+                  chains: list = None,
+                  process_id: int = 0) -> dict:
     """
     Args:
         foldseek: Binary executable file of foldseek
@@ -44,3 +44,4 @@ def get_struc_seq(foldseek,
     os.remove(tmp_save_path + ".dbtype")
     
     return struc_seq_dict
+
