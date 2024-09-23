@@ -11,13 +11,21 @@ import numpy as np
 import sys
 from model import TransformerModel
 from utils.timer import Timer
+from lightning.fabric import Fabric
+import lightning as L
 from utils.foldseek import get_struc_seq
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
 from sklearn.metrics import precision_score, recall_score, f1_score
 
-torch.manual_seed(1234)
+# Initialise fabric in order to parallelise model on GPUs
+fabric = L.Fabric(accelerator="cuda", devices="auto", strategy="ddp")
+fabric.launch()
+rank = fabric.global_rank
 
-np.set_printoptions(threshold=999999999)
+# Set seed
+torch.manual_seed(1234)
+# Set print to the maximum size
+np.set_printoptions(threshold=sys.maxsize)
 
 class SeqsDataset(Dataset):
     def __init__(self, aa_seqs, struc_seqs):
@@ -72,14 +80,15 @@ def train_model(model,
         device (...): ...
         verbose (bool): ...
     """
+
     model.train()
     
     total_loss = 0.0
     for batch in train_loader:
-        encoder_input_ids = batch['encoder_input_ids'].to(device)
-        encoder_attention_mask = batch['encoder_attention_mask'].to(device)
-        decoder_input_ids = batch['decoder_input_ids'].to(device)
-        decoder_attention_mask = batch['decoder_attention_mask'].to(device)
+        encoder_input_ids = batch['encoder_input_ids']#.to(device)
+        encoder_attention_mask = batch['encoder_attention_mask']#.to(device)
+        decoder_input_ids = batch['decoder_input_ids']#.to(device)
+        decoder_attention_mask = batch['decoder_attention_mask']#.to(device)
         
         optimizer.zero_grad()
 
@@ -113,7 +122,7 @@ def train_model(model,
         loss = criterion(logits, masked_labels)
         
         # Backward pass and optimization
-        loss.backward()
+        fabric.backward()
         optimizer.step()
 
         total_loss += loss.item()
@@ -165,10 +174,10 @@ def evaluate_model(model,
 
     with torch.no_grad():
         for batch in test_loader:
-            encoder_input_ids = batch['encoder_input_ids'].to(device)
-            encoder_attention_mask = batch['encoder_attention_mask'].to(device)
-            decoder_input_ids = batch['decoder_input_ids'].to(device)
-            decoder_attention_mask = batch['decoder_attention_mask'].to(device)
+            encoder_input_ids = batch['encoder_input_ids']#.to(device)
+            encoder_attention_mask = batch['encoder_attention_mask']#.to(device)
+            decoder_input_ids = batch['decoder_input_ids']#.to(device)
+            decoder_attention_mask = batch['decoder_attention_mask']#.to(device)
 
             # Apply masking to the decoder input sequences
             masked_decoder_input_ids = masking_struc_seqs_ids(decoder_input_ids,
@@ -242,7 +251,34 @@ def main(confile):
 
     # Get protein sequence and structural sequence (FoldSeeq) from raw data
     foldseek_path = config["foldseek_path"]
-    raw_data = [get_struc_seq(foldseek_path, pdb, chains=['A'])['A'] for pdb in pdbs]
+   
+    raw_data = []
+    for pdb in pdbs:
+        data = get_struc_seq(foldseek_path, pdb, chains=['A'])
+        if data is not None:
+            raw_data.append(data)
+        else:
+            print(f"Error: get_struc_seq failed for {pdb}. Skipping.")
+    
+    print("Raw Data Content:", raw_data)
+
+    aa_seqs = []
+    for pdb in raw_data:
+        if 'A' in pdb and isinstance(pdb['A'], tuple) and len(pdb['A']) == 2:
+            aa_seqs.append(pdb['A'][0])
+        else:
+            print("Unexpected structure for pdb:", pdb)
+    """
+    if rank == 0:
+        raw_data = [get_struc_seq(foldseek_path, pdb, chains=['A']) for pdb in pdbs]
+    else:
+        raw_data = None  # Other ranks won't run this
+
+    # Synchronize raw_data across all ranks
+    raw_data = fabric.broadcast(raw_data, src=0)
+    """
+
+    # raw_data = [get_struc_seq(foldseek_path, pdb, chains=['A']) for pdb in pdbs]
     aa_seqs = [pdb[0] for pdb in raw_data]
     struc_seqs = [pdb[1] for pdb in raw_data]
     if verbose:
@@ -300,7 +336,7 @@ def main(confile):
                              num_layers=num_layers,
                              ff_hidden_layer=ff_hidden_layer,
                              dropout=dropout,
-                             verbose=verbose).to('cuda')
+                             verbose=verbose)#.to('cuda')
     if verbose:
         summary(model)
 
@@ -313,8 +349,15 @@ def main(confile):
                 - ff_hidden_layer %d\n \
                 - dropout %f\n' % (max_len, dim_model, num_heads,
                                    num_layers, ff_hidden_layer, dropout))
+
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
+
+    # Setup fabric for the model, optimiser and DataLoaders
+    optimizer = fabric.setup_optimizers(optimizer)
+    model = fabric.setup(model)
+    train_loader = fabric.setup_dataloaders(train_loader)
+    test_loader = fabric.setup_dataloaders(test_loader)
     
     timer = Timer(autoreset=True)
     timer.start('Training started')
