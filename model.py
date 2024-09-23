@@ -1,6 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from lightning.fabric import Fabric
+import lightning as L
+
+fabric = L.Fabric(accelerator='cuda', devices="auto")
+fabric.launch()
+rank = fabric.global_rank
 
 '''
 Architecture following: Attention is all you need (original transformers paper)
@@ -46,7 +52,7 @@ class PositionalEncoding(nn.Module):
         self.pe = self.pe.unsqueeze(0)
 
     def forward(self, x):
-        x = x + self.pe[:, :x.size(1), :].to(x.device)
+        x = x + self.pe[:, :x.size(1), :].fabric.to_device(x)
         return x
 
 
@@ -84,9 +90,10 @@ class Encoder(nn.Module):
                 print(f"encoder_padding_mask: {encoder_padding_mask}")
          
         # Embedding () and Positional Encoding
+        # maybe leave out for the moment (scaling)
         encoder_emb = self.embedding_encoder(encoder_input) * \
             torch.sqrt(torch.tensor(self.embedding_encoder.embedding_dim,
-                                    dtype=torch.float64)).to(encoder_input.device)
+                                    dtype=torch.float64)).fabric.to_device(encoder_input)
         
         if self.verbose:
             print(f"encoder_emb shape: {encoder_emb.shape}")
@@ -154,7 +161,7 @@ class Decoder(nn.Module):
         # Embedding and Positional Encoding
         decoder_emb = self.embedding_decoder(decoder_input) * \
             torch.sqrt(torch.tensor(self.embedding_decoder.embedding_dim,
-                                    dtype=torch.float64)).to(decoder_input.device)
+                                    dtype=torch.float64)).fabric.to_device(decoder_input)
         
         if self.verbose:
             print(f"decoder_emb shape: {decoder_emb.shape}")
