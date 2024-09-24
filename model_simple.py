@@ -53,7 +53,7 @@ class PositionalEncoding(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, input_dim, max_len, dim_model,
                  num_heads, num_layers, ff_hidden_layer,
-                 dropout, verbose=False):
+                 dropout, verbose=0):
         
         super(Encoder, self).__init__()
         
@@ -68,18 +68,20 @@ class Encoder(nn.Module):
                                                    dropout=dropout,
                                                    batch_first=False)
 
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers)
+        self.encoder = nn.TransformerEncoder(encoder_layer,
+                                             num_layers,
+                                             enable_nested_tensor=False)
     
     def forward(self, encoder_input,
                 encoder_mask=None,
                 encoder_padding_mask=None):
         
-        if self.verbose:
-            print(f"encoder_input shape: {encoder_input.shape}")
+        if self.verbose > 1:
+            print(f"\t -encoder_input shape: {encoder_input.shape}")
 
         if encoder_padding_mask is not None:
-            if self.verbose:
-                print(f"encoder_padding_mask shape: {encoder_padding_mask.shape}")
+            if self.verbose > 1:
+                print(f"\t -encoder_padding_mask shape: {encoder_padding_mask.shape}")
          
         # Embedding () and Positional Encoding
         encoder_emb = self.embedding_encoder(encoder_input)
@@ -88,13 +90,13 @@ class Encoder(nn.Module):
         #    torch.sqrt(torch.tensor(self.embedding_encoder.embedding_dim,
         #                           dtype=torch.float64)).to(encoder_input.device)
         
-        if self.verbose:
-            print(f"encoder_emb shape: {encoder_emb.shape}")
+        if self.verbose > 1:
+            print(f"\t -encoder_emb shape: {encoder_emb.shape}")
         
         encoder_emb = self.pos_encoder(encoder_emb)
 
-        if self.verbose:
-            print(f"encoder_pos_emb shape: {encoder_emb.shape}")
+        if self.verbose > 1:
+            print(f"\t -encoder_pos_emb shape: {encoder_emb.shape}")
        
         # Encoder forward pass
         # encoder_emb batch and seq_length dim are transpose for better performance
@@ -106,11 +108,11 @@ class Encoder(nn.Module):
                               mask=encoder_mask,
                               src_key_padding_mask=encoder_padding_mask)
         
-        if self.verbose:
-            print(f"memory shape: {memory.shape}")
+        if self.verbose > 1:
+            print(f"\t -memory shape: {memory.shape}")
         
-        if self.verbose:
-            print(f"encoder_output shape: {memory.shape}")
+        if self.verbose > 1:
+            print(f"\t -encoder_output shape: {memory.shape}")
 
         return memory
 
@@ -142,12 +144,12 @@ class Decoder(nn.Module):
                 decoder_padding_mask=None,
                 memory_key_padding_mask=None):
          
-        if self.verbose:
-            print(f"decoder_input shape: {decoder_input.shape}")
+        if self.verbose > 1:
+            print(f"\t -decoder_input shape: {decoder_input.shape}")
         
         if decoder_padding_mask is not None:
-            if self.verbose:
-                print(f"decoder_padding_mask shape: {decoder_padding_mask.shape}")
+            if self.verbose > 1:
+                print(f"\t -decoder_padding_mask shape: {decoder_padding_mask.shape}")
         
         # Embedding and Positional Encoding
         decoder_emb = self.embedding_decoder(decoder_input)
@@ -155,13 +157,13 @@ class Decoder(nn.Module):
         #    torch.sqrt(torch.tensor(self.embedding_decoder.embedding_dim,
         #                            dtype=torch.float64)).to(decoder_input.device)
         
-        if self.verbose:
-            print(f"decoder_emb shape: {decoder_emb.shape}")
+        if self.verbose > 1:
+            print(f"\t -decoder_emb shape: {decoder_emb.shape}")
        
         decoder_emb = self.pos_decoder(decoder_emb)
         
-        if self.verbose:
-            print(f"decoder_emb_pos shape: {decoder_emb.shape}")
+        if self.verbose > 1:
+            print(f"\t -decoder_emb_pos shape: {decoder_emb.shape}")
 
         # Decoder forward pass
         # decoder_emb batch and seq_length dim are transpose for better performance
@@ -180,21 +182,21 @@ class Decoder(nn.Module):
                               tgt_key_padding_mask=decoder_padding_mask,
                               memory_key_padding_mask=memory_key_padding_mask)
 
-        if self.verbose:
-            print(f"decoder_output shape: {output.shape}")
+        if self.verbose > 1:
+            print(f"\t -decoder_output shape: {output.shape}")
         
         # Linear output
         logits = self.fc_out(output.transpose(0,1))
         
-        if self.verbose:
-            print(f"fc_output shape: {logits.shape}")
+        if self.verbose > 1:
+            print(f"\t -fc_output shape: {logits.shape}")
 
         return logits
 
 
 class TransformerModel(nn.Module):
     def __init__(self, input_dim, output_dim, max_len, dim_model, num_heads,
-                 num_layers, ff_hidden_layer, dropout, verbose=False):
+                 num_layers, ff_hidden_layer, dropout, verbose=0):
         
         super(TransformerModel, self).__init__()
 

@@ -59,7 +59,7 @@ def train_model(model,
                 masking_ratio,
                 epsilon,
                 device='cuda',
-                verbose=False):
+                verbose=0):
     """
     Train the model using the specified hyperparamaters
 
@@ -70,12 +70,14 @@ def train_model(model,
         criterion (...): ...
         epochs (int): Number of epochs
         device (...): ...
-        verbose (bool): ...
+        verbose (int): ...
     """
     model.train()
     
     total_loss = 0.0
-    for batch in train_loader:
+    for i, batch in enumerate(train_loader):
+        if verbose > 0:
+            print(f"\tT.Batch {i+1} of {len(train_loader)} with size {batch['encoder_input_ids'].shape[0]}")
         encoder_input_ids = batch['encoder_input_ids'].to(device)
         encoder_attention_mask = batch['encoder_attention_mask'].to(device)
         decoder_input_ids = batch['decoder_input_ids'].to(device)
@@ -92,8 +94,9 @@ def train_model(model,
                         encoder_padding_mask=encoder_attention_mask,
                         decoder_padding_mask=decoder_attention_mask)
 
-        print(logits)
-
+        if logits.isnan().any().item():
+            raise ValueError('NaN values in logits')
+        
         # Get masked labels
         masked_labels = decoder_input_ids.clone()
         mask = masked_decoder_input_ids.clone()
@@ -103,8 +106,9 @@ def train_model(model,
 
         # Flatten logits first two dimensions (concatenate seqs from batch)
         logits = logits.view(-1, logits.size(-1))
+        # Normalizing the logits
         # Adding an epsilon value to the logits in order to avoid divergence
-        logits = logits / (torch.max(logits, dim=-1, keepdim=True)[0] + epsilon)
+        # logits = logits / (torch.max(logits, dim=-1, keepdim=True)[0] + epsilon)
 
         # Flatten masked_labels dimensions (concatenate seqs from batch)
         masked_labels = masked_labels.view(-1)
@@ -118,8 +122,9 @@ def train_model(model,
 
         total_loss += loss.item()
         
-        if verbose:
-            print(f"Training Average Batch Loss: {loss.item():.4f}")
+        if verbose > 0:
+            print(f"\tTraining Average Batch Loss: {loss.item():.4f}")
+            print('\t-----------------------')
     
     avg_loss = total_loss / len(train_loader)
     print(f"Training Average Loss between Batches: {avg_loss:.4f}")
@@ -150,7 +155,7 @@ def evaluate_model(model,
                    masking_ratio,
                    epsilon,
                    device='cuda',
-                   verbose=False):
+                   verbose=0):
     """
     Evaluate the model on the test dataset with masking and proper\
     logits processing.
@@ -164,7 +169,9 @@ def evaluate_model(model,
     all_labels = []
 
     with torch.no_grad():
-        for batch in test_loader:
+        for i, batch in enumerate(test_loader):
+            if verbose > 0:
+                print(f"\tE.Batch {i+1} of {len(test_loader)} with size {batch['encoder_input_ids'].shape[0]}")  
             encoder_input_ids = batch['encoder_input_ids'].to(device)
             encoder_attention_mask = batch['encoder_attention_mask'].to(device)
             decoder_input_ids = batch['decoder_input_ids'].to(device)
@@ -234,18 +241,22 @@ def main(confile):
         config = json.load(f)
 
     verbose = config['verbose']
+    if not isinstance(verbose, int):
+        raise ValueError('verbose must be set to 0, 1, or 2')
+    elif verbose < 0 or verbose > 2:
+        raise ValueError('verboe must be set to 0, 1, or 2')
 
     # Get the data
     structures_dir = config["data_path"]
     pdbs = glob.glob('%s*.pdb' % structures_dir)
-    # pdbs = pdbs[:100]
+    pdbs = pdbs[:100]
 
     # Get protein sequence and structural sequence (FoldSeeq) from raw data
     foldseek_path = config["foldseek_path"]
     raw_data = [get_struc_seq(foldseek_path, pdb, chains=['A'])['A'] for pdb in pdbs]
     aa_seqs = [pdb[0] for pdb in raw_data]
     struc_seqs = [pdb[1] for pdb in raw_data]
-    if verbose:
+    if verbose > 0:
         print('- Total amount of structres given %d' %len(aa_seqs))
 
     # Load Dataset
@@ -258,7 +269,7 @@ def main(confile):
     test_size = int(test_split * len(dataset))
     train_size = len(dataset) - test_size
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-    if verbose:
+    if verbose > 0:
         print('- Total amount of tructures in training dataset %d' % len(train_dataset))
         print('- Total amount of structres in testing dataset %d' % len(test_dataset))
     
@@ -301,10 +312,8 @@ def main(confile):
                              ff_hidden_layer=ff_hidden_layer,
                              dropout=dropout,
                              verbose=verbose).to('cuda')
-    if verbose:
-        summary(model)
 
-    if verbose:
+    if verbose > 0:
         print('- TransformerModel initialized with\n \
                 - max_len %d\n \
                 - dim_model %d\n \
@@ -313,11 +322,14 @@ def main(confile):
                 - ff_hidden_layer %d\n \
                 - dropout %f\n' % (max_len, dim_model, num_heads,
                                    num_layers, ff_hidden_layer, dropout))
+    if verbose > 0:
+        summary(model)
+
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
     
     timer = Timer(autoreset=True)
-    timer.start('Training started')
+    timer.start('Training/Evaluation started')
     for epoch in range(epochs):
         print(f"Epoch {epoch+1}/{epochs}")
     
@@ -342,7 +354,8 @@ def main(confile):
                                             device='cuda',
                                             verbose=verbose)
         
-        print(f"Evaluation Results - Loss: {evaluation_results['avg_loss']}, Accuracy: {evaluation_results['accuracy']}, F1 Score: {evaluation_results['f1_score']}")
+        if verbose > 0:
+            print(f"Evaluation Results - Loss: {evaluation_results['avg_loss']}, Accuracy: {evaluation_results['accuracy']}, F1 Score: {evaluation_results['f1_score']}")
 
         timer.stop('Training ended')
         exit()
