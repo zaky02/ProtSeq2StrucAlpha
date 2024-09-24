@@ -73,7 +73,7 @@ class SaProtTokenizer:
             input_id = [self.token2id[token] for token in sa_list]
             input_ids.append(input_id)
 
-            attention_mask = [1 if token != self.pad_token else 0 for token in sa_list]
+            attention_mask = [0 if token != self.pad_token else 1 for token in sa_list]
             attention_masks.append(attention_mask)
 
         input_ids_tensor = torch.tensor(input_ids)
@@ -152,7 +152,7 @@ class SequenceTokenizer:
             
             input_id = [self.token2id[token] for token in seq]
             input_ids.append(input_id)
-            attention_mask = [1 if token != self.pad_token else 0 for token in seq]
+            attention_mask = [0 if token != self.pad_token else 1 for token in seq]
             attention_masks.append(attention_mask)
 
         input_ids_tensor = torch.tensor(input_ids)
@@ -235,7 +235,7 @@ class FoldSeekTokenizer:
 
             input_id = [self.token2id[token] for token in seq]
             input_ids.append(input_id)
-            attention_mask = [1 if token != self.pad_token else 0 for token in seq]
+            attention_mask = [0 if token != self.pad_token else 1 for token in seq]
             attention_masks.append(attention_mask)
 
         input_ids_tensor = torch.tensor(input_ids)
