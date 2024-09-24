@@ -76,17 +76,17 @@ class Encoder(nn.Module):
         
         if self.verbose:
             print(f"encoder_input shape: {encoder_input.shape}")
-            print(f"encoder_input: {encoder_input}")
 
         if encoder_padding_mask is not None:
             if self.verbose:
                 print(f"encoder_padding_mask shape: {encoder_padding_mask.shape}")
-                print(f"encoder_padding_mask: {encoder_padding_mask}")
          
         # Embedding () and Positional Encoding
-        encoder_emb = self.embedding_encoder(encoder_input) * \
-            torch.sqrt(torch.tensor(self.embedding_encoder.embedding_dim,
-                                    dtype=torch.float64)).to(encoder_input.device)
+        encoder_emb = self.embedding_encoder(encoder_input)
+        # To scale the embedding 
+        # encoder_emb = self.embedding_encoder(encoder_input) * \
+        #    torch.sqrt(torch.tensor(self.embedding_encoder.embedding_dim,
+        #                           dtype=torch.float64)).to(encoder_input.device)
         
         if self.verbose:
             print(f"encoder_emb shape: {encoder_emb.shape}")
@@ -99,16 +99,16 @@ class Encoder(nn.Module):
         # Encoder forward pass
         # encoder_emb batch and seq_length dim are transpose for better performance
         if torch.is_tensor(encoder_mask):
-            encoder_mask = encoder_mask.float()
+            encoder_mask = encoder_mask.bool()
         if torch.is_tensor(encoder_padding_mask):
-            encoder_padding_mask = encoder_padding_mask.float()
+            encoder_padding_mask = encoder_padding_mask.bool()
         memory = self.encoder(encoder_emb.transpose(0,1),
                               mask=encoder_mask,
                               src_key_padding_mask=encoder_padding_mask)
         
         if self.verbose:
-            print(f"encoder_padding_mask: {encoder_padding_mask}")
-
+            print(f"memory shape: {memory.shape}")
+        
         if self.verbose:
             print(f"encoder_output shape: {memory.shape}")
 
@@ -144,21 +144,20 @@ class Decoder(nn.Module):
          
         if self.verbose:
             print(f"decoder_input shape: {decoder_input.shape}")
-            print(f"decoder_input: {decoder_input}")
         
         if decoder_padding_mask is not None:
             if self.verbose:
                 print(f"decoder_padding_mask shape: {decoder_padding_mask.shape}")
-                print(f"decoder_padding_mask: {decoder_padding_mask}")
         
         # Embedding and Positional Encoding
-        decoder_emb = self.embedding_decoder(decoder_input) * \
-            torch.sqrt(torch.tensor(self.embedding_decoder.embedding_dim,
-                                    dtype=torch.float64)).to(decoder_input.device)
+        decoder_emb = self.embedding_decoder(decoder_input)
+        # decoder_emb = self.embedding_decoder(decoder_input) * \
+        #    torch.sqrt(torch.tensor(self.embedding_decoder.embedding_dim,
+        #                            dtype=torch.float64)).to(decoder_input.device)
         
         if self.verbose:
             print(f"decoder_emb shape: {decoder_emb.shape}")
-
+       
         decoder_emb = self.pos_decoder(decoder_emb)
         
         if self.verbose:
@@ -167,21 +166,19 @@ class Decoder(nn.Module):
         # Decoder forward pass
         # decoder_emb batch and seq_length dim are transpose for better performance
         if torch.is_tensor(decoder_mask):
-            decoder_mask = decoder_mask.float()
+            decoder_mask = decoder_mask.bool()
         if torch.is_tensor(memory_mask):
-            memory_mask = memory_mask.float()
+            memory_mask = memory_mask.bool()
         if torch.is_tensor(decoder_padding_mask):
-            decoder_padding_mask = decoder_padding_mask.float()
+            decoder_padding_mask = decoder_padding_mask.bool()
         if torch.is_tensor(memory_key_padding_mask):
-            memory_key_padding_mask = memory_key_padding_mask.float()
+            memory_key_padding_mask = memory_key_padding_mask.bool()
         output = self.decoder(decoder_emb.transpose(0,1),
                               memory,
                               tgt_mask=decoder_mask,
                               memory_mask=memory_mask,
                               tgt_key_padding_mask=decoder_padding_mask,
                               memory_key_padding_mask=memory_key_padding_mask)
-        if self.verbose:
-            print(f"decoder_padding_mask: {decoder_padding_mask}")
 
         if self.verbose:
             print(f"decoder_output shape: {output.shape}")
