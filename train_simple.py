@@ -14,6 +14,7 @@ from utils.timer import Timer
 from utils.foldseek import get_struc_seq
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
+import time
 
 torch.manual_seed(1234)
 
@@ -76,8 +77,10 @@ def train_model(model,
     
     total_loss = 0.0
     for i, batch in enumerate(train_loader):
+        
         if verbose > 0:
             print(f"\tT.Batch {i+1} of {len(train_loader)} with size {batch['encoder_input_ids'].shape[0]}")
+        
         encoder_input_ids = batch['encoder_input_ids'].to(device)
         encoder_attention_mask = batch['encoder_attention_mask'].to(device)
         decoder_input_ids = batch['decoder_input_ids'].to(device)
@@ -88,11 +91,18 @@ def train_model(model,
         masked_decoder_input_ids = masking_struc_seqs_ids(decoder_input_ids,
                                                           tokenizer_struc_seqs,
                                                           masking_ratio)
+        
+        # TransformerDecoder uses Teacher Forcing, meaning that decoder_input
+        # is used sequentially to predict (not autoregressive training)
+        # Decoder_input uses from <cls> to decoder_input_ids[i][-1]
+        # Given our tokenization masked_decoder_input_ids must be left shifted by 1
+        decoder_input = masked_decoder_input_ids[:, :-1]
+
         # Forward pass through the model
         logits = model(encoder_input=encoder_input_ids,
-                        decoder_input=masked_decoder_input_ids,
-                        encoder_padding_mask=encoder_attention_mask,
-                        decoder_padding_mask=decoder_attention_mask)
+                       decoder_input=decoder_input,
+                       encoder_padding_mask=encoder_attention_mask,
+                       decoder_padding_mask=decoder_attention_mask[:, :-1])
 
         if logits.isnan().any().item():
             raise ValueError('NaN values in logits')
@@ -103,15 +113,20 @@ def train_model(model,
         mask_id = tokenizer_struc_seqs.mask_id
         mask = (mask == mask_id)
         masked_labels[~mask] = -100
+        # Decoding outputs start with the prediction of cls.
+        # At each step t the decoder is train to predict the token
+        # decoder_input_ids(t+1) based on decoder_input_ids(t)
+        # Given our tokenization masked_labels must be ritgh shifted by 1
+        masked_labels = masked_labels[:, 1:]
 
         # Flatten logits first two dimensions (concatenate seqs from batch)
-        logits = logits.view(-1, logits.size(-1))
+        logits = logits.contiguous().view(-1, logits.size(-1))
         # Normalizing the logits
         # Adding an epsilon value to the logits in order to avoid divergence
         # logits = logits / (torch.max(logits, dim=-1, keepdim=True)[0] + epsilon)
 
         # Flatten masked_labels dimensions (concatenate seqs from batch)
-        masked_labels = masked_labels.view(-1)
+        masked_labels = masked_labels.contiguous().view(-1)
         
         # Compute batch loss
         loss = criterion(logits, masked_labels)
@@ -147,15 +162,14 @@ def masking_struc_seqs_ids(decoder_input_ids,
     
     return masked_decoder_input_ids
 
-
-def evaluate_model(model,
-                   test_loader,
-                   criterion,
-                   tokenizer_struc_seqs,
-                   masking_ratio,
-                   epsilon,
-                   device='cuda',
-                   verbose=0):
+def evaluate_model_0(model,
+                     test_loader,
+                     criterion,
+                     tokenizer_struc_seqs,
+                     masking_ratio,
+                     epsilon,
+                     device='cuda',
+                     verbose=0):
     """
     Evaluate the model on the test dataset with masking and proper\
     logits processing.
@@ -167,7 +181,6 @@ def evaluate_model(model,
 
     all_preds = []
     all_labels = []
-
     with torch.no_grad():
         for i, batch in enumerate(test_loader):
             
@@ -176,12 +189,16 @@ def evaluate_model(model,
             
             encoder_input_ids = batch['encoder_input_ids'].to(device)
             decoder_input_ids = batch['decoder_input_ids'].to(device)
+            encoder_attention_mask = batch['encoder_attention_mask'].to(device)
+            decoder_attention_mask = batch['decoder_attention_mask'].to(device)
 
             # Forward pass with masked inputs
             logits = model(encoder_input=encoder_input_ids,
-                           decoder_input=decoder_input_ids)
+                           decoder_input=decoder_input_ids[:, :-1],
+                           encoder_padding_mask=encoder_attention_mask,
+                           decoder_padding_mask=decoder_attention_mask)
             
-            labels = decoder_input_ids
+            labels = decoder_input_ids[:, 1:]
 
             # Flatten logits and masked_labels to compute loss
             logits = logits.view(-1, logits.size(-1))
@@ -221,6 +238,140 @@ def evaluate_model(model,
     accuracy = accuracy_score(all_labels,
                               all_preds)
     
+    avg_loss = total_loss / len(test_loader)
+    print(f"Evaluation Average Loss between Batches: {avg_loss:.4f}")
+    print(f"Total Evaluation Loss between Batches: {total_loss:.4f}")
+    print(f"Evaluation precision {precision:.4f}")
+    print(f"Evaluation recall {recall:.4f}")
+    print(f"Evaluation accuracy {accuracy:.4f}")
+    print(f"Evaluation F1-score {f1:.4f}")
+
+    return {"avg_loss": avg_loss, "total_loss": total_loss,
+            "precision": precision, "recall": recall,
+            "accuracy": accuracy, "f1_score": f1}
+
+def evaluate_model(model,
+                   test_loader,
+                   criterion,
+                   tokenizer_struc_seqs,
+                   masking_ratio,
+                   epsilon,
+                   device='cuda',
+                   verbose=0):
+    """
+    Evaluate the model on the test dataset with masking and proper\
+    logits processing.
+    """
+    model.eval()
+    total_loss = 0.0
+    total_correct = 0
+    total_samples = 0
+
+    all_preds = []
+    all_labels = []
+    with torch.no_grad():
+        for i, batch in enumerate(test_loader):
+            
+            if verbose > 0:
+                print(f"\tE.Batch {i+1} of {len(test_loader)} with size {batch['encoder_input_ids'].shape[0]}")  
+            
+            encoder_input_ids = batch['encoder_input_ids'].to(device)
+            decoder_input_ids = batch['decoder_input_ids'].to(device)
+            encoder_attention_mask = batch['encoder_attention_mask'].to(device)
+            decoder_attention_mask = batch['decoder_attention_mask'].to(device)
+
+            cls_id = tokenizer_struc_seqs.cls_id
+            pad_id = tokenizer_struc_seqs.pad_id
+            max_len = decoder_input_ids.shape[-1]
+            batch_size = decoder_input_ids.shape[0]
+            
+            # Start with the <cls> (start token) as the first input to the decoder
+            decoder_input = torch.full((batch_size, 1), cls_id).to(device)
+            print(decoder_input)
+            predicted = []
+
+            # Forward pass through the encoder
+            memory = model.encoder_block(encoder_input=encoder_input_ids,
+                                         encoder_padding_mask=encoder_attention_mask)
+
+            for t in range(max_len-1):
+                print(t)
+                # No autoregressive masking; only padding masks are applied
+                decoder_padding_mask = (decoder_input == pad_id).to(device)
+                #print(decoder_padding_mask)
+                
+                # Forward pass through the decoder
+                # Memory uses the encoder's padding mask (not sure)
+                logits = model.decoder_block(decoder_input=decoder_input,
+                                             memory=memory,
+                                             decoder_padding_mask=decoder_padding_mask,
+                                             memory_key_padding_mask=encoder_attention_mask)
+        
+                # Get the predicted token from the last step
+                print(logits.shape)
+                pred_token = logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
+                print(pred_token)
+                print(pred_token.shape)
+                predicted.append(pred_token)
+                # Append the predicted token to the decoder input for the next step
+                decoder_input = torch.cat((decoder_input, pred_token), dim=1)
+                print(decoder_input)
+                print(decoder_input.shape)
+                print('----------------------------')
+                #time.sleep(5)
+            # Concatenate the list of predictions
+            predicted = torch.cat(predicted, dim=1)  # shape: (batch_size, trg_len)
+            print(predicted)
+            print(predicted.shape)
+            print(decoder_input)
+            print(decoder_input.shape)
+            labels = decoder_input_ids
+            print(labels)
+            print(labels.shape)
+            labels = labels[:, 1:]
+            print(labels)
+            print(labels.shape)
+            logits = logits.view(-1, logits.shape[-1])  # Flatten the output for loss calculation
+            labels = labels.contiguous().view(-1)  # Flatten the target
+            loss = criterion(logits, labels)
+            total_loss += loss.item()
+            print(loss.item())
+            predicted = predicted.contiguous().view(-1)
+            print(predicted)
+            print(predicted.shape)
+
+
+            # Append predictions and labels for F1 calculation
+            all_labels.extend(labels.cpu().numpy())
+            print(all_labels)
+            print(len(all_labels))
+            all_preds.extend(predicted.cpu().numpy())
+            print(all_preds)
+            print(len(all_preds))
+            correct = (predicted == labels).sum().item()
+            print(correct)
+
+            if verbose > 0:
+                print(f"\tEvaluation Average Batch Loss: {loss.item():.4f}")
+                print(f"\tEvalutation correctly predicted structural tokens {correct}/{len(labels)}") 
+                print('\t-----------------------')
+    
+    # Compute F1 score, precision, and recall using sklearn
+    precision = precision_score(all_labels,
+                                all_preds,
+                                average='macro',
+                                zero_division=0)
+    recall = recall_score(all_labels,
+                          all_preds,
+                          average='macro',
+                          zero_division=0)
+    f1 = f1_score(all_labels,
+                  all_preds,
+                  average='macro',
+                  zero_division=0)
+    accuracy = accuracy_score(all_labels,
+                              all_preds)
+    print(len(test_loader))
     avg_loss = total_loss / len(test_loader)
     print(f"Evaluation Average Loss between Batches: {avg_loss:.4f}")
     print(f"Total Evaluation Loss between Batches: {total_loss:.4f}")

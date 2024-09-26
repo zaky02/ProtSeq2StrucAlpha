@@ -223,7 +223,7 @@ class TransformerModel(nn.Module):
                                     encoder_padding_mask=encoder_padding_mask)
         
         # Decoder pass
-        output = self.decoder_block(decoder_input,memory,
+        output = self.decoder_block(decoder_input, memory,
                                     decoder_mask=decoder_mask,
                                     memory_mask=memory_mask,
                                     decoder_padding_mask=decoder_padding_mask,
