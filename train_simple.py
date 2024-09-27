@@ -95,6 +95,9 @@ def train_model(model,
     print(f"Training Average Loss between Batches: {avg_loss:.4f}")
     print(f"Total Training Loss between Batches: {total_loss:.4f}")
 
+    # Log training loss to wandb
+    wandb.log({"train_loss": avg_loss})
+
 def evaluate_model(model,
                    test_loader,
                    criterion,
@@ -196,11 +199,11 @@ def evaluate_model(model,
     print(f"Evaluation accuracy {accuracy:.4f}")
     print(f"Evaluation F1-score {f1:.4f}")
 
-    return {"avg_loss": avg_loss, "total_loss": total_loss,
-            "precision": precision, "recall": recall,
-            "accuracy": accuracy, "f1_score": f1}
-
-
+    # Log evaluation metrics to wandb
+    wandb.log({"avg_loss": avg_loss, "total_loss": total_loss,
+               "precision": precision, "recall": recall,
+               "accuracy": accuracy, "f1_score": f1})
+    
 def main(confile):
 
     with open(confile, 'r') as f:
@@ -212,10 +215,16 @@ def main(confile):
     elif verbose < 0 or verbose > 2:
         raise ValueError('verboe must be set to 0, 1, or 2')
 
+    # Initialize wandb
+    if config['get_wandb']:
+        wandb.init(project=config["wandb_project"],
+                   config={"dataset": "sample_DB",
+                           "architecture": "Transformer"})
+
     # Get the data
     structures_dir = config["data_path"]
     pdbs = glob.glob('%s*.pdb' % structures_dir)
-    pdbs = pdbs[:100]
+    pdbs = pdbs[:1000]
 
     # Get protein sequence and structural sequence (FoldSeeq) from raw data
     foldseek_path = config["foldseek_path"]
@@ -281,18 +290,17 @@ def main(confile):
                              dropout=dropout,
                              verbose=verbose).to('cuda')
 
-    # Example input tensor for draw_graph visualization (for a transformer model)
-    # Ensure these are LongTensors (integer types) since embeddings require integer input
-    dummy_encoder_input = torch.randint(0, tokenizer_aa_seqs.vocab_size, (batch_size, max_len), dtype=torch.long).to('cuda')
-    dummy_decoder_input = torch.randint(0, tokenizer_struc_seqs.vocab_size, (batch_size, max_len), dtype=torch.long).to('cuda')
+    encoder_input = torch.randint(0, tokenizer_aa_seqs.vocab_size,
+                                  (batch_size, max_len),
+                                  dtype=torch.long).to('cuda')
+    decoder_input = torch.randint(0, tokenizer_struc_seqs.vocab_size,
+                                  (batch_size, max_len),
+                                  dtype=torch.long).to('cuda')
 
-    # Draw and save the model graph
-    try:
-        model_graph = draw_graph(model, input_data=[dummy_encoder_input, dummy_decoder_input], expand_nested=True)
-        model_graph.visual_graph.render("model_graph", format="pdf")  # Save graph as a PDF
-        print("Model graph saved as model_graph.pdf.")
-    except Exception as e:
-        print(f"Error generating model graph: {e}")
+    model_graph = draw_graph(model,
+                             input_data=[encoder_input, decoder_input],
+                             expand_nested=True)
+    model_graph.visual_graph.render("model_graph", format="pdf")
     
     if verbose > 0:
         print('- TransformerModel initialized with\n \
@@ -344,20 +352,7 @@ def main(confile):
         timer_eval.stop()
 
         timer_epoch.stop()
-        exit()
-
-
-        # Log the evaluation results to wandb if applicable
-        get_wandb = config['get_wandb']
-        if get_wandb:
-            wandb.init(project=config["wandb_project"],
-                       config={"dataset": "sample_DB",
-                               "architecture": "Transformer"})
-            wandb.log({"epoch": epoch + 1,
-                       "loss": evaluation_results['avg_loss'],
-                       "accuracy": evaluation_results['accuracy'],
-                       "f1_score": evaluation_results['f1_score']})
-
+        
     timer.stop('Training/Evaluation (%d epochs) ended' % epochs)
 
 
