@@ -295,10 +295,14 @@ def main(confile):
     criterion = nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
 
     timer = Timer(autoreset=True)
-    timer.start('Training/Evaluation started')
+    timer.start('Training/Evaluation (%d epochs)' % epochs)
     for epoch in range(epochs):
-        print(f"Epoch {epoch+1}/{epochs}")
+        
+        timer_epoch = Timer(autoreset=True)
+        timer_epoch.start('Epoch %d / %d' %(epoch+1, epochs))
 
+        timer_train = Timer(autoreset=True)
+        timer_train.start('Training')
         # Train the model
         train_model(model,
                     train_loader,
@@ -309,7 +313,10 @@ def main(confile):
                     epsilon=epsilon,
                     device='cuda',
                     verbose=verbose)
-
+        timer_train.stop()
+        
+        timer_eval = Timer(autoreset=True)
+        timer_eval.start('Evaluation')
         # Evaluate the model
         evaluation_results = evaluate_model(model,
                                             test_loader,
@@ -319,6 +326,9 @@ def main(confile):
                                             epsilon=epsilon,
                                             device='cuda',
                                             verbose=verbose)
+        timer_eval.stop()
+
+        timer_epoch.stop()
         exit()
 
 
@@ -333,7 +343,7 @@ def main(confile):
                        "accuracy": evaluation_results['accuracy'],
                        "f1_score": evaluation_results['f1_score']})
 
-    timer.stop('Training/Evaluation ended')
+    timer.stop('Training/Evaluation (%d epochs) ended' % epochs)
 
 
 if __name__ == "__main__":
