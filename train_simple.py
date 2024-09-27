@@ -9,48 +9,17 @@ import glob
 import wandb
 import numpy as np
 import sys
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
+import time
 from model_simple import TransformerModel
 from utils.timer import Timer
 from utils.foldseek import get_struc_seq
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
-from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
-import time
+from dataset import SeqsDataset, collate_fn
 
 torch.manual_seed(1234)
 
 np.set_printoptions(threshold=999999999)
-
-class SeqsDataset(Dataset):
-    def __init__(self, aa_seqs, struc_seqs):
-        self.aa_seqs = aa_seqs
-        self.struc_seqs = struc_seqs
-
-    def __len__(self):
-        return len(self.aa_seqs)
-
-    def __getitem__(self, idx):
-        # Return protein and structural sequence pairs without tokenizing
-        aa_seq = self.aa_seqs[idx]
-        struc_seq = self.struc_seqs[idx]
-        return aa_seq, struc_seq
-
-def collate_fn(batch, tokenizer_aa_seqs, tokenizer_struc_seqs, max_len=1024):
-    aa_seqs = [item[0] for item in batch]
-    struc_seqs = [item[1] for item in batch]
-
-    # Tokenize the protein sequences (encoder input)
-    encoded_aa_seqs = tokenizer_aa_seqs(aa_seqs, max_len=max_len, padding=True, truncation=True)
-
-    # Tokenize the structural sequences (decoder input/output)
-    encoded_struc_seqs = tokenizer_struc_seqs(struc_seqs, max_len=max_len, padding=True, truncation=True)
-
-    return {
-        'encoder_input_ids': encoded_aa_seqs['input_ids'],
-        'encoder_attention_mask': encoded_aa_seqs['attention_mask'],
-        'decoder_input_ids': encoded_struc_seqs['input_ids'],
-        'decoder_attention_mask': encoded_struc_seqs['attention_mask']
-    }
-
 
 def train_model(model,
                 train_loader,
@@ -74,50 +43,29 @@ def train_model(model,
         verbose (int): ...
     """
     model.train()
-    
+
     total_loss = 0.0
     for i, batch in enumerate(train_loader):
-        
+
         if verbose > 0:
             print(f"\tT.Batch {i+1} of {len(train_loader)} with size {batch['encoder_input_ids'].shape[0]}")
-        
+
         encoder_input_ids = batch['encoder_input_ids'].to(device)
         encoder_attention_mask = batch['encoder_attention_mask'].to(device)
         decoder_input_ids = batch['decoder_input_ids'].to(device)
         decoder_attention_mask = batch['decoder_attention_mask'].to(device)
-        
-        optimizer.zero_grad()
+        labels = batch['labels'].to(device)
 
-        masked_decoder_input_ids = masking_struc_seqs_ids(decoder_input_ids,
-                                                          tokenizer_struc_seqs,
-                                                          masking_ratio)
-        
-        # TransformerDecoder uses Teacher Forcing, meaning that decoder_input
-        # is used sequentially to predict (not autoregressive training)
-        # Decoder_input uses from <cls> to decoder_input_ids[i][-1]
-        # Given our tokenization masked_decoder_input_ids must be left shifted by 1
-        decoder_input = masked_decoder_input_ids[:, :-1]
+        optimizer.zero_grad()
 
         # Forward pass through the model
         logits = model(encoder_input=encoder_input_ids,
-                       decoder_input=decoder_input,
+                       decoder_input=decoder_input_ids,
                        encoder_padding_mask=encoder_attention_mask,
-                       decoder_padding_mask=decoder_attention_mask[:, :-1])
+                       decoder_padding_mask=decoder_attention_mask)
 
         if logits.isnan().any().item():
             raise ValueError('NaN values in logits')
-        
-        # Get masked labels
-        masked_labels = decoder_input_ids.clone()
-        mask = masked_decoder_input_ids.clone()
-        mask_id = tokenizer_struc_seqs.mask_id
-        mask = (mask == mask_id)
-        masked_labels[~mask] = -100
-        # Decoding outputs start with the prediction of cls.
-        # At each step t the decoder is train to predict the token
-        # decoder_input_ids(t+1) based on decoder_input_ids(t)
-        # Given our tokenization masked_labels must be ritgh shifted by 1
-        masked_labels = masked_labels[:, 1:]
 
         # Flatten logits first two dimensions (concatenate seqs from batch)
         logits = logits.contiguous().view(-1, logits.size(-1))
@@ -126,129 +74,24 @@ def train_model(model,
         # logits = logits / (torch.max(logits, dim=-1, keepdim=True)[0] + epsilon)
 
         # Flatten masked_labels dimensions (concatenate seqs from batch)
-        masked_labels = masked_labels.contiguous().view(-1)
-        
+        labels = labels.contiguous().view(-1)
+
         # Compute batch loss
-        loss = criterion(logits, masked_labels)
-        
+        loss = criterion(logits, labels)
+
         # Backward pass and optimization
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item()
-        
+
         if verbose > 0:
             print(f"\tTraining Average Batch Loss: {loss.item():.4f}")
             print('\t-----------------------')
-    
+
     avg_loss = total_loss / len(train_loader)
     print(f"Training Average Loss between Batches: {avg_loss:.4f}")
     print(f"Total Training Loss between Batches: {total_loss:.4f}")
-
-def masking_struc_seqs_ids(decoder_input_ids,
-                           tokenizer_struc_seqs,
-                           masking_ratio=0.15):
-
-    mask_token_id = tokenizer_struc_seqs.mask_id
-    eos_token_id = tokenizer_struc_seqs.eos_id
-
-    masked_decoder_input_ids = decoder_input_ids.clone()
-    for input_id in masked_decoder_input_ids:
-        end_idx = (input_id == eos_token_id).nonzero(as_tuple=True)[0].item()
-        seq_len = end_idx - 1
-        num_elements_to_mask = max(1, int(seq_len * masking_ratio))
-        idxs_to_mask = torch.randperm(seq_len)[:num_elements_to_mask] + 1
-        input_id[idxs_to_mask] = mask_token_id
-    
-    return masked_decoder_input_ids
-
-def evaluate_model_0(model,
-                     test_loader,
-                     criterion,
-                     tokenizer_struc_seqs,
-                     masking_ratio,
-                     epsilon,
-                     device='cuda',
-                     verbose=0):
-    """
-    Evaluate the model on the test dataset with masking and proper\
-    logits processing.
-    """
-    model.eval()
-    total_loss = 0.0
-    total_correct = 0
-    total_samples = 0
-
-    all_preds = []
-    all_labels = []
-    with torch.no_grad():
-        for i, batch in enumerate(test_loader):
-            
-            if verbose > 0:
-                print(f"\tE.Batch {i+1} of {len(test_loader)} with size {batch['encoder_input_ids'].shape[0]}")  
-            
-            encoder_input_ids = batch['encoder_input_ids'].to(device)
-            decoder_input_ids = batch['decoder_input_ids'].to(device)
-            encoder_attention_mask = batch['encoder_attention_mask'].to(device)
-            decoder_attention_mask = batch['decoder_attention_mask'].to(device)
-
-            # Forward pass with masked inputs
-            logits = model(encoder_input=encoder_input_ids,
-                           decoder_input=decoder_input_ids[:, :-1],
-                           encoder_padding_mask=encoder_attention_mask,
-                           decoder_padding_mask=decoder_attention_mask)
-            
-            labels = decoder_input_ids[:, 1:]
-
-            # Flatten logits and masked_labels to compute loss
-            logits = logits.view(-1, logits.size(-1))
-            #logits = logits / (torch.max(logits, dim=-1, keepdim=True)[0] + epsilon)  # Preventing divergence
-            labels = labels.view(-1)
-
-            # Compute loss
-            loss = criterion(logits, labels)
-            total_loss += loss.item()
-
-            # Compute accuracy (only consider non-masked positions)
-            predicted = torch.argmax(logits, dim=-1)
-
-            # Append predictions and labels for F1 calculation
-            all_labels.extend(labels.cpu().numpy())
-            all_preds.extend(predicted.cpu().numpy())
-            correct = (predicted == labels).sum().item()
-
-            if verbose > 0:
-                print(f"\tEvaluation Average Batch Loss: {loss.item():.4f}")
-                print(f"\tEvalutation correctly predicted structural tokens {correct}/{len(labels)}") 
-                print('\t-----------------------')
-    
-    # Compute F1 score, precision, and recall using sklearn
-    precision = precision_score(all_labels,
-                                all_preds,
-                                average='macro',
-                                zero_division=0)
-    recall = recall_score(all_labels,
-                          all_preds,
-                          average='macro',
-                          zero_division=0)
-    f1 = f1_score(all_labels,
-                  all_preds,
-                  average='macro',
-                  zero_division=0)
-    accuracy = accuracy_score(all_labels,
-                              all_preds)
-    
-    avg_loss = total_loss / len(test_loader)
-    print(f"Evaluation Average Loss between Batches: {avg_loss:.4f}")
-    print(f"Total Evaluation Loss between Batches: {total_loss:.4f}")
-    print(f"Evaluation precision {precision:.4f}")
-    print(f"Evaluation recall {recall:.4f}")
-    print(f"Evaluation accuracy {accuracy:.4f}")
-    print(f"Evaluation F1-score {f1:.4f}")
-
-    return {"avg_loss": avg_loss, "total_loss": total_loss,
-            "precision": precision, "recall": recall,
-            "accuracy": accuracy, "f1_score": f1}
 
 def evaluate_model(model,
                    test_loader,
@@ -271,91 +114,62 @@ def evaluate_model(model,
     all_labels = []
     with torch.no_grad():
         for i, batch in enumerate(test_loader):
-            
+
             if verbose > 0:
-                print(f"\tE.Batch {i+1} of {len(test_loader)} with size {batch['encoder_input_ids'].shape[0]}")  
-            
+                print(f"\tE.Batch {i+1} of {len(test_loader)} with size {batch['encoder_input_ids'].shape[0]}")
+
             encoder_input_ids = batch['encoder_input_ids'].to(device)
-            decoder_input_ids = batch['decoder_input_ids'].to(device)
             encoder_attention_mask = batch['encoder_attention_mask'].to(device)
-            decoder_attention_mask = batch['decoder_attention_mask'].to(device)
+            labels = batch['labels'].to(device)
 
             cls_id = tokenizer_struc_seqs.cls_id
             pad_id = tokenizer_struc_seqs.pad_id
-            max_len = decoder_input_ids.shape[-1]
-            batch_size = decoder_input_ids.shape[0]
-            
+            max_len = encoder_input_ids.shape[-1]
+            batch_size = encoder_input_ids.shape[0]
+
             # Start with the <cls> (start token) as the first input to the decoder
             decoder_input = torch.full((batch_size, 1), cls_id).to(device)
-            print(decoder_input)
             predicted = []
 
             # Forward pass through the encoder
             memory = model.encoder_block(encoder_input=encoder_input_ids,
                                          encoder_padding_mask=encoder_attention_mask)
-
             for t in range(max_len-1):
-                print(t)
                 # No autoregressive masking; only padding masks are applied
                 decoder_padding_mask = (decoder_input == pad_id).to(device)
-                #print(decoder_padding_mask)
-                
+
                 # Forward pass through the decoder
                 # Memory uses the encoder's padding mask (not sure)
                 logits = model.decoder_block(decoder_input=decoder_input,
                                              memory=memory,
                                              decoder_padding_mask=decoder_padding_mask,
                                              memory_key_padding_mask=encoder_attention_mask)
-        
+
                 # Get the predicted token from the last step
-                print(logits.shape)
                 pred_token = logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
-                print(pred_token)
-                print(pred_token.shape)
                 predicted.append(pred_token)
                 # Append the predicted token to the decoder input for the next step
                 decoder_input = torch.cat((decoder_input, pred_token), dim=1)
-                print(decoder_input)
-                print(decoder_input.shape)
-                print('----------------------------')
-                #time.sleep(5)
+            
             # Concatenate the list of predictions
             predicted = torch.cat(predicted, dim=1)  # shape: (batch_size, trg_len)
-            print(predicted)
-            print(predicted.shape)
-            print(decoder_input)
-            print(decoder_input.shape)
-            labels = decoder_input_ids
-            print(labels)
-            print(labels.shape)
-            labels = labels[:, 1:]
-            print(labels)
-            print(labels.shape)
             logits = logits.view(-1, logits.shape[-1])  # Flatten the output for loss calculation
             labels = labels.contiguous().view(-1)  # Flatten the target
             loss = criterion(logits, labels)
             total_loss += loss.item()
-            print(loss.item())
             predicted = predicted.contiguous().view(-1)
-            print(predicted)
-            print(predicted.shape)
 
 
             # Append predictions and labels for F1 calculation
             all_labels.extend(labels.cpu().numpy())
-            print(all_labels)
-            print(len(all_labels))
             all_preds.extend(predicted.cpu().numpy())
-            print(all_preds)
-            print(len(all_preds))
             correct = (predicted == labels).sum().item()
-            print(correct)
 
             if verbose > 0:
                 print(f"\tEvaluation Average Batch Loss: {loss.item():.4f}")
-                print(f"\tEvalutation correctly predicted structural tokens {correct}/{len(labels)}") 
+                print(f"\tEvalutation correctly predicted structural tokens {correct}/{len(labels)}")
                 print('\t-----------------------')
-    
+
     # Compute F1 score, precision, and recall using sklearn
     precision = precision_score(all_labels,
                                 all_preds,
@@ -371,7 +185,7 @@ def evaluate_model(model,
                   zero_division=0)
     accuracy = accuracy_score(all_labels,
                               all_preds)
-    print(len(test_loader))
+    
     avg_loss = total_loss / len(test_loader)
     print(f"Evaluation Average Loss between Batches: {avg_loss:.4f}")
     print(f"Total Evaluation Loss between Batches: {total_loss:.4f}")
@@ -386,7 +200,7 @@ def evaluate_model(model,
 
 
 def main(confile):
-    
+
     with open(confile, 'r') as f:
         config = json.load(f)
 
@@ -416,13 +230,14 @@ def main(confile):
 
     # Split Dataset into training and testing
     test_split = config["test_split"]
+    masking_ratio = config['masking_ratio']
     test_size = int(test_split * len(dataset))
     train_size = len(dataset) - test_size
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
     if verbose > 0:
         print('- Total amount of tructures in training dataset %d' % len(train_dataset))
         print('- Total amount of structres in testing dataset %d' % len(test_dataset))
-    
+
     # Load DataLoader
     batch_size = config['batch_size']
     max_len = config['max_len']
@@ -432,7 +247,9 @@ def main(confile):
                                collate_fn=lambda batch: collate_fn(batch,
                                                                    tokenizer_aa_seqs,
                                                                    tokenizer_struc_seqs,
-                                                                   max_len=max_len)) 
+                                                                   masking_ratio=masking_ratio,
+                                                                   max_len=max_len))
+
     test_loader =  DataLoader(test_dataset,
                               batch_size=batch_size,
                               shuffle=True,
@@ -444,14 +261,13 @@ def main(confile):
     # Get model hyperparamaters
     epochs = config['epochs']
     learning_rate = config['learning_rate']
-    masking_ratio = config['masking_ratio']
     epsilon = config["epsilon"]
     dim_model = config['dim_model']
     num_heads = config['num_heads']
     num_layers = config['num_layers']
     ff_hidden_layer = config['ff_hidden_layer']
     dropout = config['dropout']
-    
+
     # Initialize model, optimizer, and loss function
     model = TransformerModel(input_dim=tokenizer_aa_seqs.vocab_size,
                              output_dim=tokenizer_struc_seqs.vocab_size,
@@ -477,12 +293,12 @@ def main(confile):
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
-    
+
     timer = Timer(autoreset=True)
     timer.start('Training/Evaluation started')
     for epoch in range(epochs):
         print(f"Epoch {epoch+1}/{epochs}")
-    
+
         # Train the model
         train_model(model,
                     train_loader,
@@ -493,7 +309,7 @@ def main(confile):
                     epsilon=epsilon,
                     device='cuda',
                     verbose=verbose)
-        
+
         # Evaluate the model
         evaluation_results = evaluate_model(model,
                                             test_loader,
@@ -503,8 +319,8 @@ def main(confile):
                                             epsilon=epsilon,
                                             device='cuda',
                                             verbose=verbose)
-        
         exit()
+
 
         # Log the evaluation results to wandb if applicable
         get_wandb = config['get_wandb']
@@ -512,17 +328,17 @@ def main(confile):
             wandb.init(project=config["wandb_project"],
                        config={"dataset": "sample_DB",
                                "architecture": "Transformer"})
-            wandb.log({"epoch": epoch + 1, 
-                       "loss": evaluation_results['avg_loss'], 
+            wandb.log({"epoch": epoch + 1,
+                       "loss": evaluation_results['avg_loss'],
                        "accuracy": evaluation_results['accuracy'],
                        "f1_score": evaluation_results['f1_score']})
-    
+
     timer.stop('Training/Evaluation ended')
 
 
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--config', type=str,
                         default='config.json',
