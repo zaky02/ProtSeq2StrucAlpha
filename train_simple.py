@@ -3,6 +3,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset, random_split
 import torch.optim as optim
 from torchinfo import summary
+import torchvision
+from torchview import draw_graph
 import random
 import json
 import glob
@@ -43,7 +45,7 @@ def train_model(model,
         verbose (int): ...
     """
     model.train()
-
+    
     total_loss = 0.0
     for i, batch in enumerate(train_loader):
 
@@ -63,7 +65,7 @@ def train_model(model,
                        decoder_input=decoder_input_ids,
                        encoder_padding_mask=encoder_attention_mask,
                        decoder_padding_mask=decoder_attention_mask)
-
+        
         if logits.isnan().any().item():
             raise ValueError('NaN values in logits')
 
@@ -279,6 +281,19 @@ def main(confile):
                              dropout=dropout,
                              verbose=verbose).to('cuda')
 
+    # Example input tensor for draw_graph visualization (for a transformer model)
+    # Ensure these are LongTensors (integer types) since embeddings require integer input
+    dummy_encoder_input = torch.randint(0, tokenizer_aa_seqs.vocab_size, (batch_size, max_len), dtype=torch.long).to('cuda')
+    dummy_decoder_input = torch.randint(0, tokenizer_struc_seqs.vocab_size, (batch_size, max_len), dtype=torch.long).to('cuda')
+
+    # Draw and save the model graph
+    try:
+        model_graph = draw_graph(model, input_data=[dummy_encoder_input, dummy_decoder_input], expand_nested=True)
+        model_graph.visual_graph.render("model_graph", format="pdf")  # Save graph as a PDF
+        print("Model graph saved as model_graph.pdf.")
+    except Exception as e:
+        print(f"Error generating model graph: {e}")
+    
     if verbose > 0:
         print('- TransformerModel initialized with\n \
                 - max_len %d\n \
