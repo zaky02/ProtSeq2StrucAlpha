@@ -289,19 +289,23 @@ def main(confile):
                              ff_hidden_layer=ff_hidden_layer,
                              dropout=dropout,
                              verbose=verbose).to('cuda')
-
-    encoder_input = torch.randint(0, tokenizer_aa_seqs.vocab_size,
-                                  (batch_size, max_len),
-                                  dtype=torch.long).to('cuda')
-    decoder_input = torch.randint(0, tokenizer_struc_seqs.vocab_size,
-                                  (batch_size, max_len),
-                                  dtype=torch.long).to('cuda')
-
-    model_graph = draw_graph(model,
-                             input_data=[encoder_input, decoder_input],
-                             expand_nested=True)
-    model_graph.visual_graph.render("model_graph", format="pdf")
     
+    draw_model = config['draw_model_graph']
+    if draw_model:
+        encoder_input = torch.randint(0, tokenizer_aa_seqs.vocab_size,
+                                      (batch_size, max_len),
+                                      dtype=torch.long).to('cuda')
+
+        decoder_input = torch.randint(0, tokenizer_struc_seqs.vocab_size,
+                                      (batch_size, max_len),
+                                      dtype=torch.long).to('cuda')
+
+        model_graph = draw_graph(model,
+                                 input_data=[encoder_input, decoder_input],
+                                 expand_nested=True)
+
+        model_graph.visual_graph.render("model_graph", format="pdf")
+    exit() 
     if verbose > 0:
         print('- TransformerModel initialized with\n \
                 - max_len %d\n \
