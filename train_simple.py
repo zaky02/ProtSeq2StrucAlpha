@@ -94,9 +94,8 @@ def train_model(model,
     avg_loss = total_loss / len(train_loader)
     print(f"Training Average Loss between Batches: {avg_loss:.4f}")
     print(f"Total Training Loss between Batches: {total_loss:.4f}")
-
-    # Log training loss to wandb
-    wandb.log({"train_loss": avg_loss})
+    
+    return {'train_loss': avg_loss}
 
 def evaluate_model(model,
                    test_loader,
@@ -199,11 +198,9 @@ def evaluate_model(model,
     print(f"Evaluation accuracy {accuracy:.4f}")
     print(f"Evaluation F1-score {f1:.4f}")
 
-    # Log evaluation metrics to wandb
-    wandb.log({"avg_loss": avg_loss, "total_loss": total_loss,
-               "precision": precision, "recall": recall,
-               "accuracy": accuracy, "f1_score": f1})
-    
+    return {"eval_loss": avg_loss, "precision": precision,
+            "recall": recall, "accuracy": accuracy, "f1_score": f1}
+
 def main(confile):
 
     with open(confile, 'r') as f:
@@ -224,7 +221,7 @@ def main(confile):
     # Get the data
     structures_dir = config["data_path"]
     pdbs = glob.glob('%s*.pdb' % structures_dir)
-    pdbs = pdbs[:1000]
+    pdbs = pdbs[:100]
 
     # Get protein sequence and structural sequence (FoldSeeq) from raw data
     foldseek_path = config["foldseek_path"]
@@ -305,7 +302,7 @@ def main(confile):
                                  expand_nested=True)
 
         model_graph.visual_graph.render("model_graph", format="pdf")
-    exit() 
+    
     if verbose > 0:
         print('- TransformerModel initialized with\n \
                 - max_len %d\n \
@@ -331,21 +328,21 @@ def main(confile):
         timer_train = Timer(autoreset=True)
         timer_train.start('Training')
         # Train the model
-        train_model(model,
-                    train_loader,
-                    optimizer,
-                    criterion,
-                    tokenizer_struc_seqs,
-                    masking_ratio=masking_ratio,
-                    epsilon=epsilon,
-                    device='cuda',
-                    verbose=verbose)
+        training_metrics = train_model(model,
+                                       train_loader,
+                                       optimizer,
+                                       criterion,
+                                       tokenizer_struc_seqs,
+                                       masking_ratio=masking_ratio,
+                                       epsilon=epsilon,
+                                       device='cuda',
+                                       verbose=verbose)
         timer_train.stop()
         
         timer_eval = Timer(autoreset=True)
         timer_eval.start('Evaluation')
         # Evaluate the model
-        evaluation_results = evaluate_model(model,
+        evaluation_metrics = evaluate_model(model,
                                             test_loader,
                                             criterion,
                                             tokenizer_struc_seqs,
@@ -354,6 +351,13 @@ def main(confile):
                                             device='cuda',
                                             verbose=verbose)
         timer_eval.stop()
+        
+        # Log training and evaluation metrics to wandb
+        wandb.log({"train_loss": training_metrics['train_loss'],
+                   "eval_loss": evaluation_metrics['eval_loss'],
+                   "precision": evaluation_metrics['precision'],
+                   "accuracy": evaluation_metrics['accuracy'],
+                   "F1": evaluation_metrics['f1_score']})
 
         timer_epoch.stop()
         
