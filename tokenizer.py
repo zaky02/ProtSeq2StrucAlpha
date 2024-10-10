@@ -144,17 +144,16 @@ class SequenceTokenizer:
                 seq = seq[:max_len]
             
             seq = [self.cls_token] + seq + [self.eos_token]
-            
+
             # Padding strategy longest
             # with cls and eos the input length is len(seq)+2
-            if padding and len(seq) < longest:
+            if padding and len(seq) < longest + 2:
                 seq = seq + [self.pad_token] * (longest - len(seq) + 2)
             
             input_id = [self.token2id[token] for token in seq]
             input_ids.append(input_id)
             attention_mask = [0 if token != self.pad_token else 1 for token in seq]
             attention_masks.append(attention_mask)
-
         input_ids_tensor = torch.tensor(input_ids)
         attention_masks_tensor = torch.tensor(attention_masks)
         
@@ -230,7 +229,7 @@ class FoldSeekTokenizer:
             
             # Padding strategy longest
             # with cls and eos the input length is len(seq)+2
-            if padding and len(seq) < longest:
+            if padding and len(seq) < longest + 2:
                 seq = seq + [self.pad_token] * (longest - len(seq) + 2)
 
             input_id = [self.token2id[token] for token in seq]

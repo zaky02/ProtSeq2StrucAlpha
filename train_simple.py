@@ -245,7 +245,7 @@ def main(confile):
     max_len = config['max_len']
     train_loader =  DataLoader(train_dataset,
                                batch_size=batch_size,
-                               shuffle=True,
+                               shuffle=False,
                                collate_fn=lambda batch: collate_fn(batch,
                                                                    tokenizer_aa_seqs,
                                                                    tokenizer_struc_seqs,
@@ -254,7 +254,7 @@ def main(confile):
 
     test_loader =  DataLoader(test_dataset,
                               batch_size=batch_size,
-                              shuffle=True,
+                              shuffle=False,
                               collate_fn=lambda batch: collate_fn(batch,
                                                                   tokenizer_aa_seqs,
                                                                   tokenizer_struc_seqs,
@@ -316,10 +316,10 @@ def main(confile):
     if config['get_wandb']:
         wandb.init(project=config["wandb_project"],
                    config={"dataset": "sample_DB",
-                           "architecture": "Transformer"
+                           "architecture": "Transformer",
                            "learning_rate": learning_rate,
                            "batch_size": batch_size,
-                           "num_epochs": num_epochs,
+                           "num_epochs": epochs,
                            "dim_model": dim_model,
                            "num_heads": num_heads,
                            "ff_hidden_layer": ff_hidden_layer,
