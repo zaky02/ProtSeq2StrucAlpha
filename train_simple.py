@@ -212,12 +212,6 @@ def main(confile):
     elif verbose < 0 or verbose > 2:
         raise ValueError('verboe must be set to 0, 1, or 2')
 
-    # Initialize wandb
-    if config['get_wandb']:
-        wandb.init(project=config["wandb_project"],
-                   config={"dataset": "sample_DB",
-                           "architecture": "Transformer"})
-
     # Get the data
     structures_dir = config["data_path"]
     pdbs = glob.glob('%s*.pdb' % structures_dir)
@@ -317,6 +311,20 @@ def main(confile):
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
+    
+    # Initialize wandb
+    if config['get_wandb']:
+        wandb.init(project=config["wandb_project"],
+                   config={"dataset": "sample_DB",
+                           "architecture": "Transformer"
+                           "learning_rate": learning_rate,
+                           "batch_size": batch_size,
+                           "num_epochs": num_epochs,
+                           "dim_model": dim_model,
+                           "num_heads": num_heads,
+                           "ff_hidden_layer": ff_hidden_layer,
+                           "dropout": dropout,
+                           "num_layers": num_layers})
 
     timer = Timer(autoreset=True)
     timer.start('Training/Evaluation (%d epochs)' % epochs)
