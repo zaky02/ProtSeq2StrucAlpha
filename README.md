@@ -5,4 +5,5 @@ One of the key advantages of using Foldseek structural tokens is that it allows 
 
 ## Input and Output
 Input: Protein's amino acid sequence.
+
 Output: Corresponding sequence of Foldseek structural tokens.
