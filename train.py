@@ -5,6 +5,7 @@ import torch.optim as optim
 from torchinfo import summary
 import torchvision
 from torchview import draw_graph
+from lightning.fabric import Fabric
 import random
 import json
 import glob
@@ -13,11 +14,12 @@ import numpy as np
 import sys
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 import time
-from model_simple import TransformerModel
+from model import TransformerModel
 from utils.timer import Timer
 from utils.foldseek import get_struc_seq
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
 from dataset import SeqsDataset, collate_fn
+from utils import memory
 
 torch.manual_seed(1234)
 
@@ -201,17 +203,44 @@ def evaluate_model(model,
     return {"eval_loss": avg_loss, "precision": precision,
             "recall": recall, "accuracy": accuracy, "f1_score": f1}
 
-def main(confile):
+def draw_model_graph(model,
+                     encoder_tokenizer,
+                     decoder_tokenizer,
+                     batch_size,
+                     max_len):
+    encoder_input = torch.randint(0, encoder_tokenizer.vocab_size,
+                                  (batch_size, max_len),
+                                  dtype=torch.long)
+    decoder_input = torch.randint(0, decoder_tokenizer.vocab_size,
+                                  (batch_size, max_len),
+                                  dtype=torch.long)
+
+    model_graph = draw_graph(model,
+                             input_data=[encoder_input, decoder_input],
+                             expand_nested=True)
+
+    model_graph.visual_graph.render("model_graph", format="pdf")
+
+
+def main(confile): 
 
     with open(confile, 'r') as f:
         config = json.load(f)
-
+ 
     verbose = config['verbose']
     if not isinstance(verbose, int):
         raise ValueError('verbose must be set to 0, 1, or 2')
     elif verbose < 0 or verbose > 2:
         raise ValueError('verboe must be set to 0, 1, or 2')
 
+    # Initialize Fabric parallelization
+    num_gpus = config['num_gpus']
+    parallel_strategy = config['parallel_strategy']
+    fabric = Fabric(accelerator='cuda',
+                    devices=num_gpus,
+                    num_nodes=1,
+                    strategy=parallel_strategy)
+    
     # Get the data
     structures_dir = config["data_path"]
     pdbs = glob.glob('%s*.pdb' % structures_dir)
@@ -222,7 +251,7 @@ def main(confile):
     raw_data = [get_struc_seq(foldseek_path, pdb, chains=['A'])['A'] for pdb in pdbs]
     aa_seqs = [pdb[0] for pdb in raw_data]
     struc_seqs = [pdb[1] for pdb in raw_data]
-    if verbose > 0:
+    if verbose > 0 and fabric.is_global_zero:
         print('- Total amount of structres given %d' %len(aa_seqs))
 
     # Load Dataset
@@ -236,10 +265,12 @@ def main(confile):
     test_size = int(test_split * len(dataset))
     train_size = len(dataset) - test_size
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-    if verbose > 0:
+    if verbose > 0 and fabric.is_global_zero:
         print('- Total amount of tructures in training dataset %d' % len(train_dataset))
         print('- Total amount of structres in testing dataset %d' % len(test_dataset))
 
+    fabric.launch()
+    
     # Load DataLoader
     batch_size = config['batch_size']
     max_len = config['max_len']
@@ -259,6 +290,9 @@ def main(confile):
                                                                   tokenizer_aa_seqs,
                                                                   tokenizer_struc_seqs,
                                                                   max_len=max_len))
+    
+    train_loader, test_loader = fabric.setup_dataloaders(train_loader,
+                                                         test_loader)
 
     # Get model hyperparamaters
     epochs = config['epochs']
@@ -269,7 +303,7 @@ def main(confile):
     num_layers = config['num_layers']
     ff_hidden_layer = config['ff_hidden_layer']
     dropout = config['dropout']
-
+    
     # Initialize model, optimizer, and loss function
     model = TransformerModel(input_dim=tokenizer_aa_seqs.vocab_size,
                              output_dim=tokenizer_struc_seqs.vocab_size,
@@ -279,25 +313,19 @@ def main(confile):
                              num_layers=num_layers,
                              ff_hidden_layer=ff_hidden_layer,
                              dropout=dropout,
-                             verbose=verbose).to('cuda')
-    
+                             verbose=verbose)#.to('cuda')
+     
+    model = fabric.setup_module(model)
+ 
     draw_model = config['draw_model_graph']
     if draw_model:
-        encoder_input = torch.randint(0, tokenizer_aa_seqs.vocab_size,
-                                      (batch_size, max_len),
-                                      dtype=torch.long).to('cuda')
-
-        decoder_input = torch.randint(0, tokenizer_struc_seqs.vocab_size,
-                                      (batch_size, max_len),
-                                      dtype=torch.long).to('cuda')
-
-        model_graph = draw_graph(model,
-                                 input_data=[encoder_input, decoder_input],
-                                 expand_nested=True)
-
-        model_graph.visual_graph.render("model_graph", format="pdf")
+        draw_model_graph(model=model,
+                         encoder_tokenizer=tokenizer_aa_seqs, 
+                         decoder_tokenizer=tokenizer_struc_seqs,
+                         batch_size=batch_size,
+                         max_len=max_len)
     
-    if verbose > 0:
+    if verbose > 0 and fabric.is_global_zero:
         print('- TransformerModel initialized with\n \
                 - max_len %d\n \
                 - dim_model %d\n \
@@ -306,12 +334,20 @@ def main(confile):
                 - ff_hidden_layer %d\n \
                 - dropout %f\n' % (max_len, dim_model, num_heads,
                                    num_layers, ff_hidden_layer, dropout))
-    if verbose > 0:
+    if verbose > 0 and fabric.is_global_zero:
         summary(model)
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
-    
+   
+    optimizer = fabric.setup_optimizers(optimizer)
+
+    if fabric.is_global_zero: 
+        memory.get_GPU_memory(device='cuda:0')
+        memory.get_GPU_memory(device='cuda:1')
+        memory.get_CPU_memory()
+        print('-----------------------------------------')
+
     # Initialize wandb
     if config['get_wandb']:
         wandb.init(project=config["wandb_project"],
@@ -325,6 +361,7 @@ def main(confile):
                            "ff_hidden_layer": ff_hidden_layer,
                            "dropout": dropout,
                            "num_layers": num_layers})
+    exit()
 
     timer = Timer(autoreset=True)
     timer.start('Training/Evaluation (%d epochs)' % epochs)
