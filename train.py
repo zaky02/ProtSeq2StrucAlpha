@@ -140,6 +140,7 @@ def evaluate_model(model,
             # Forward pass through the encoder
             memory = model.encoder_block(encoder_input=encoder_input_ids,
                                          encoder_padding_mask=encoder_attention_mask)
+
             for t in range(max_len-1):
                 # No autoregressive masking; only padding masks are applied
                 decoder_padding_mask = (decoder_input == pad_id).to(device)
@@ -244,7 +245,7 @@ def main(confile):
     # Get the data
     structures_dir = config["data_path"]
     pdbs = glob.glob('%s*.pdb' % structures_dir)
-    pdbs = pdbs[:100]
+    pdbs = pdbs[:10]
 
     # Get protein sequence and structural sequence (FoldSeeq) from raw data
     foldseek_path = config["foldseek_path"]
@@ -361,7 +362,6 @@ def main(confile):
                            "ff_hidden_layer": ff_hidden_layer,
                            "dropout": dropout,
                            "num_layers": num_layers})
-    exit()
 
     timer = Timer(autoreset=True)
     timer.start('Training/Evaluation (%d epochs)' % epochs)
