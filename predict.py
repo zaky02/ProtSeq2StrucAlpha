@@ -56,6 +56,7 @@ def infer(model,
             # Convert predicted tokens to sequence
             predicted_tokens = torch.cat(predicted_tokens, dim=1).squeeze(0).cpu().numpy()
             predicted_struc_seq = [tokenizer_struc_seqs.id2token[id] for id in predicted_tokens]
+            predicted_struc_seq = ''.join(predicted_struc_seq)
             predicted_struc_seqs.append(predicted_struc_seq)
 
     return predicted_struc_seqs
@@ -105,8 +106,7 @@ def main(confile):
     for pdb, aa_seq, pred_struc_seq in zip(pdbs,
                                            sequences,
                                            predicted_struc_seqs):
-        print(f"PDB File: {pdb}")
-        print(f"Amino Acid Sequence: {aa_seq}")
+        print(f"Amino Acid Sequence: {aa_seq}\n")
         print(f"Predicted Structural Sequence: {pred_struc_seq}\n")
 
 
