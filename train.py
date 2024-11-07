@@ -402,7 +402,9 @@ def main(confile):
                    "eval_loss": evaluation_metrics['eval_loss'],
                    "precision": evaluation_metrics['precision'],
                    "accuracy": evaluation_metrics['accuracy'],
-                   "F1": evaluation_metrics['f1_score']})
+                   "F1": evaluation_metrics['f1_score'],
+                   "Epoch": epoch + 1},
+                   step=epoch+1)
 
         timer_epoch.stop()
         
