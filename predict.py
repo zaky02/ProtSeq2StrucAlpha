@@ -17,27 +17,30 @@ def infer(model,
     give us a list of predicted foldseek structural sequences.
     """
     model.eval()
+
     cls_id = tokenizer_struc_seqs.cls_id
     pad_id = tokenizer_struc_seqs.pad_id
 
     predicted_struc_seqs = []
+
     with torch.no_grad():
         for sequence in sequences:
             max_len = len(sequence)
+
+            # Tokenize the input amino acid sequence
             input_ids = tokenizer_aa_seqs(sequence,
                                           max_len=max_len,
                                           padding=True,
                                           truncation=True)
-            encoder_input_ids = input_ids['input_ids'].to(device)
 
-            # Forward pass through encoder
+            encoder_input_ids = input_ids['input_ids'].to(device)
             encoder_attention_mask = input_ids['attention_mask'].to(device)
             
             memory = model.encoder_block(encoder_input=encoder_input_ids,
                                          encoder_padding_mask=encoder_attention_mask)
             
-            # Initialize decoder input with the <cls> token
-            decoder_input = torch.full((1, 1), cls_id, dtype=torch.long, device=device)
+            # Initialise decoder input with the <cls> token
+            decoder_input = torch.tensor([[cls_id]]).to(device)
             predicted_tokens = []
 
             # Autoregressive decoding
