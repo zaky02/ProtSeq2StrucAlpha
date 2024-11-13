@@ -166,7 +166,6 @@ def evaluate_model(model,
             total_loss += loss.item()
             predicted = predicted.contiguous().view(-1)
 
-
             # Append predictions and labels for F1 calculation
             all_labels.extend(labels.cpu().numpy())
             all_preds.extend(predicted.cpu().numpy())
@@ -245,7 +244,7 @@ def main(confile):
     # Get the data
     structures_dir = config["data_path"]
     pdbs = glob.glob('%s*.pdb' % structures_dir)
-    pdbs = pdbs[:10]
+    #pdbs = pdbs[:10]
 
     # Get protein sequence and structural sequence (FoldSeeq) from raw data
     foldseek_path = config["foldseek_path"]
@@ -402,8 +401,7 @@ def main(confile):
                    "eval_loss": evaluation_metrics['eval_loss'],
                    "precision": evaluation_metrics['precision'],
                    "accuracy": evaluation_metrics['accuracy'],
-                   "F1": evaluation_metrics['f1_score'],
-                   "Epoch": epoch + 1},
+                   "F1": evaluation_metrics['f1_score']},
                    step=epoch+1)
 
         timer_epoch.stop()
