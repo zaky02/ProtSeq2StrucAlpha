@@ -215,11 +215,18 @@ def draw_model_graph(model,
                                   (batch_size, max_len),
                                   dtype=torch.long)
 
+    encoder_input = fabric.to_device(encoder_input)
+    decoder_input = fabric.to_device(decoder_input)
+
     model_graph = draw_graph(model,
                              input_data=[encoder_input, decoder_input],
                              expand_nested=True)
 
     model_graph.visual_graph.render("model_graph", format="pdf")
+
+    encoder_input = encoder_input.detach().cpu()
+    decoder_input = decoder_input.detach().cpu()
+    torch.cuda.empty_cache()
 
 
 def main(confile): 
@@ -244,7 +251,7 @@ def main(confile):
     # Get the data
     structures_dir = config["data_path"]
     pdbs = glob.glob('%s*.pdb' % structures_dir)
-    #pdbs = pdbs[:10]
+    pdbs = pdbs[:50]
 
     # Get protein sequence and structural sequence (FoldSeeq) from raw data
     foldseek_path = config["foldseek_path"]
@@ -316,7 +323,7 @@ def main(confile):
                              verbose=verbose)#.to('cuda')
      
     model = fabric.setup_module(model)
- 
+
     draw_model = config['draw_model_graph']
     if draw_model:
         draw_model_graph(model=model,
@@ -341,6 +348,16 @@ def main(confile):
     criterion = nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
    
     optimizer = fabric.setup_optimizers(optimizer)
+
+    # Print model's state_dict
+    print("Model's state_dict:")
+    for param_tensor in model.state_dict():
+        print(param_tensor, "\t", model.state_dict()[param_tensor].size())
+    
+    # Print optimizer's state_dict
+    print("Optimizer's state_dict:")
+    for var_name in optimizer.state_dict():
+        print(var_name, "\t", optimizer.state_dict()[var_name])
 
     if fabric.is_global_zero: 
         memory.get_GPU_memory(device='cuda:0')
