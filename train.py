@@ -19,7 +19,7 @@ from utils.timer import Timer
 from utils.foldseek import get_struc_seq
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
 from dataset import SeqsDataset, collate_fn
-from utils import memory
+from utils import memory as mem
 
 torch.manual_seed(1234)
 
@@ -30,6 +30,7 @@ def train_model(model,
                 optimizer,
                 criterion,
                 tokenizer_struc_seqs,
+                fabric,
                 masking_ratio,
                 epsilon,
                 device='cuda',
@@ -47,19 +48,18 @@ def train_model(model,
         verbose (int): ...
     """
     model.train()
-    
     total_loss = 0.0
     for i, batch in enumerate(train_loader):
 
-        if verbose > 0:
+        if verbose > 0 and fabric.is_global_zero:
             print(f"\tT.Batch {i+1} of {len(train_loader)} with size {batch['encoder_input_ids'].shape[0]}")
 
-        encoder_input_ids = batch['encoder_input_ids'].to(device)
-        encoder_attention_mask = batch['encoder_attention_mask'].to(device)
-        decoder_input_ids = batch['decoder_input_ids'].to(device)
-        decoder_attention_mask = batch['decoder_attention_mask'].to(device)
-        labels = batch['labels'].to(device)
-
+        encoder_input_ids = fabric.to_device(batch['encoder_input_ids'])
+        encoder_attention_mask = fabric.to_device(batch['encoder_attention_mask'])
+        decoder_input_ids = fabric.to_device(batch['decoder_input_ids'])
+        decoder_attention_mask = fabric.to_device(batch['decoder_attention_mask'])
+        labels = fabric.to_device(batch['labels'])
+    
         optimizer.zero_grad()
 
         # Forward pass through the model
@@ -84,25 +84,26 @@ def train_model(model,
         loss = criterion(logits, labels)
 
         # Backward pass and optimization
-        loss.backward()
+        fabric.backward(loss)
         optimizer.step()
 
         total_loss += loss.item()
 
-        if verbose > 0:
+        if verbose > 0 and fabric.is_global_zero:
             print(f"\tTraining Average Batch Loss: {loss.item():.4f}")
             print('\t-----------------------')
 
     avg_loss = total_loss / len(train_loader)
     print(f"Training Average Loss between Batches: {avg_loss:.4f}")
     print(f"Total Training Loss between Batches: {total_loss:.4f}")
-    
+
     return {'train_loss': avg_loss}
 
 def evaluate_model(model,
                    test_loader,
                    criterion,
                    tokenizer_struc_seqs,
+                   fabric,
                    masking_ratio,
                    epsilon,
                    device='cuda',
@@ -118,15 +119,16 @@ def evaluate_model(model,
 
     all_preds = []
     all_labels = []
+
     with torch.no_grad():
         for i, batch in enumerate(test_loader):
 
-            if verbose > 0:
+            if verbose > 0 and fabric.is_global_zero:
                 print(f"\tE.Batch {i+1} of {len(test_loader)} with size {batch['encoder_input_ids'].shape[0]}")
 
-            encoder_input_ids = batch['encoder_input_ids'].to(device)
-            encoder_attention_mask = batch['encoder_attention_mask'].to(device)
-            labels = batch['labels'].to(device)
+            encoder_input_ids = fabric.to_device(batch['encoder_input_ids'])
+            encoder_attention_mask = fabric.to_device(batch['encoder_attention_mask'])
+            labels = fabric.to_device(batch['labels'])
 
             cls_id = tokenizer_struc_seqs.cls_id
             pad_id = tokenizer_struc_seqs.pad_id
@@ -134,16 +136,16 @@ def evaluate_model(model,
             batch_size = encoder_input_ids.shape[0]
 
             # Start with the <cls> (start token) as the first input to the decoder
-            decoder_input = torch.full((batch_size, 1), cls_id).to(device)
+            decoder_input = fabric.to_device(torch.full((batch_size, 1), cls_id))
             predicted = []
 
             # Forward pass through the encoder
             memory = model.encoder_block(encoder_input=encoder_input_ids,
                                          encoder_padding_mask=encoder_attention_mask)
-
+            
             for t in range(max_len-1):
                 # No autoregressive masking; only padding masks are applied
-                decoder_padding_mask = (decoder_input == pad_id).to(device)
+                decoder_padding_mask = fabric.to_device((decoder_input == pad_id))
 
                 # Forward pass through the decoder
                 # Memory uses the encoder's padding mask (not sure)
@@ -151,7 +153,7 @@ def evaluate_model(model,
                                              memory=memory,
                                              decoder_padding_mask=decoder_padding_mask,
                                              memory_key_padding_mask=encoder_attention_mask)
-
+                
                 # Get the predicted token from the last step
                 pred_token = logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
                 predicted.append(pred_token)
@@ -171,7 +173,7 @@ def evaluate_model(model,
             all_preds.extend(predicted.cpu().numpy())
             correct = (predicted == labels).sum().item()
 
-            if verbose > 0:
+            if verbose > 0 and fabric.is_global_zero:
                 print(f"\tEvaluation Average Batch Loss: {loss.item():.4f}")
                 print(f"\tEvalutation correctly predicted structural tokens {correct}/{len(labels)}")
                 print('\t-----------------------')
@@ -207,7 +209,8 @@ def draw_model_graph(model,
                      encoder_tokenizer,
                      decoder_tokenizer,
                      batch_size,
-                     max_len):
+                     max_len,
+                     fabric):
     encoder_input = torch.randint(0, encoder_tokenizer.vocab_size,
                                   (batch_size, max_len),
                                   dtype=torch.long)
@@ -251,7 +254,7 @@ def main(confile):
     # Get the data
     structures_dir = config["data_path"]
     pdbs = glob.glob('%s*.pdb' % structures_dir)
-    pdbs = pdbs[:50]
+    pdbs = pdbs[:1000]
 
     # Get protein sequence and structural sequence (FoldSeeq) from raw data
     foldseek_path = config["foldseek_path"]
@@ -324,13 +327,14 @@ def main(confile):
      
     model = fabric.setup_module(model)
 
-    draw_model = config['draw_model_graph']
+    draw_model = config['draw_model']
     if draw_model:
         draw_model_graph(model=model,
                          encoder_tokenizer=tokenizer_aa_seqs, 
                          decoder_tokenizer=tokenizer_struc_seqs,
                          batch_size=batch_size,
-                         max_len=max_len)
+                         max_len=max_len,
+                         frabric=fabric)
     
     if verbose > 0 and fabric.is_global_zero:
         print('- TransformerModel initialized with\n \
@@ -350,23 +354,24 @@ def main(confile):
     optimizer = fabric.setup_optimizers(optimizer)
 
     # Print model's state_dict
-    print("Model's state_dict:")
-    for param_tensor in model.state_dict():
-        print(param_tensor, "\t", model.state_dict()[param_tensor].size())
+    #print("Model's state_dict:")
+    #for param_tensor in model.state_dict():
+    #    print(param_tensor, "\t", model.state_dict()[param_tensor].size())
     
     # Print optimizer's state_dict
-    print("Optimizer's state_dict:")
-    for var_name in optimizer.state_dict():
-        print(var_name, "\t", optimizer.state_dict()[var_name])
+    #print("Optimizer's state_dict:")
+    #for var_name in optimizer.state_dict():
+    #    print(var_name, "\t", optimizer.state_dict()[var_name])
 
-    if fabric.is_global_zero: 
-        memory.get_GPU_memory(device='cuda:0')
-        memory.get_GPU_memory(device='cuda:1')
-        memory.get_CPU_memory()
-        print('-----------------------------------------')
-
+    #if fabric.is_global_zero:
+    #    print('Model optimizer and DataLoaders to fabric:')
+    #    mem.get_GPU_memory(device='cuda:0')
+    #    mem.get_GPU_memory(device='cuda:1')
+    #    mem.get_CPU_memory()
+    #    print('-----------------------------------------')
+    
     # Initialize wandb
-    if config['get_wandb']:
+    if config['get_wandb'] and fabric.is_global_zero:
         wandb.init(project=config["wandb_project"],
                    config={"dataset": "sample_DB",
                            "architecture": "Transformer",
@@ -394,6 +399,7 @@ def main(confile):
                                        optimizer,
                                        criterion,
                                        tokenizer_struc_seqs,
+                                       fabric,
                                        masking_ratio=masking_ratio,
                                        epsilon=epsilon,
                                        device='cuda',
@@ -407,6 +413,7 @@ def main(confile):
                                             test_loader,
                                             criterion,
                                             tokenizer_struc_seqs,
+                                            fabric,
                                             masking_ratio=masking_ratio,
                                             epsilon=epsilon,
                                             device='cuda',
@@ -414,12 +421,13 @@ def main(confile):
         timer_eval.stop()
         
         # Log training and evaluation metrics to wandb
-        wandb.log({"train_loss": training_metrics['train_loss'],
-                   "eval_loss": evaluation_metrics['eval_loss'],
-                   "precision": evaluation_metrics['precision'],
-                   "accuracy": evaluation_metrics['accuracy'],
-                   "F1": evaluation_metrics['f1_score']},
-                   step=epoch+1)
+        if config['get_wandb'] and fabric.is_global_zero:
+            wandb.log({"train_loss": training_metrics['train_loss'],
+                       "eval_loss": evaluation_metrics['eval_loss'],
+                       "precision": evaluation_metrics['precision'],
+                       "accuracy": evaluation_metrics['accuracy'],
+                       "F1": evaluation_metrics['f1_score']},
+                       step=epoch+1)
 
         timer_epoch.stop()
         
