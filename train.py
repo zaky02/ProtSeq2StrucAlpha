@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset, random_split
 import torch.optim as optim
 from torchinfo import summary
+import torch.distributed as dist
 import torchvision
 from torchview import draw_graph
 from lightning.fabric import Fabric
@@ -49,6 +50,7 @@ def train_model(model,
     """
     model.train()
     total_loss = 0.0
+
     for i, batch in enumerate(train_loader):
 
         if verbose > 0 and fabric.is_global_zero:
@@ -96,13 +98,18 @@ def train_model(model,
         if verbose > 0 and fabric.is_global_zero:
             print("----------------------")
 
-    avg_loss = total_loss / len(train_loader)
-    print(f"Training Average Loss between Batches in cuda:{fabric.global_rank}: {avg_loss:.4f}")
-    print(f"Total Training Loss between Batches in cuda:{fabric.global_rank}: {total_loss:.4f}")
+    gpu_avg_loss = total_loss / len(train_loader)
+    avg_loss = fabric.all_reduce(gpu_avg_loss)
+    print(f"Training Average Loss between Batches in cuda:{fabric.global_rank}: {gpu_avg_loss:.4f}")
+    
+    fabric.barrier()
+    if fabric.is_global_zero:
+        print(f"Training Average Loss between Batches: {avg_loss:.4f}")
    
     fabric.barrier()
 
-    return {'train_loss': avg_loss}
+    return {'gpu_train_loss': gpu_avg_loss,
+            'train_loss': avg_loss}
 
 def evaluate_model(model,
                    test_loader,
@@ -174,46 +181,119 @@ def evaluate_model(model,
             predicted = predicted.contiguous().view(-1)
 
             # Append predictions and labels for F1 calculation
-            all_labels.extend(labels.cpu().numpy())
-            all_preds.extend(predicted.cpu().numpy())
-            correct = (predicted == labels).sum().item()
+            all_labels.append(labels)
+            all_preds.append(predicted)
 
             if verbose > 0:
                 print(f"\tEvaluation Average Batch Loss in cuda:{fabric.global_rank}: {loss.item():.4f}")
-                print(f"\tEvalutation correctly predicted structural tokens in cuda:{fabric.global_rank} {correct}/{len(labels)}")
             
             fabric.barrier()
             if verbose > 0 and fabric.is_global_zero:
                 print("----------------------")
 
+    all_labels = torch.cat(all_labels)
+    all_preds = torch.cat(all_preds)
+
+    gather_labels = all_gather(all_labels)
+    gather_labels = torch.cat(gather_labels)
+    gather_labels = gather_labels.cpu().numpy()
+    gather_preds = all_gather(all_preds)
+    gather_preds = torch.cat(gather_preds)
+    gather_preds = gather_preds.cpu().numpy()
+
+    all_labels = all_labels.cpu().numpy()
+    all_preds = all_preds.cpu().numpy()
+
     # Compute F1 score, precision, and recall using sklearn
-    precision = precision_score(all_labels,
-                                all_preds,
+    gpu_precision = precision_score(all_labels,
+                                    all_preds,
+                                    average='macro',
+                                    zero_division=0)
+    gpu_recall = recall_score(all_labels,
+                              all_preds,
+                              average='macro',
+                              zero_division=0)
+    gpu_f1 = f1_score(all_labels,
+                      all_preds,
+                      average='macro',
+                      zero_division=0)
+    gpu_accuracy = accuracy_score(all_labels,
+                                  all_preds)
+    
+    # Compute F1 score, precision, and recall using sklearn
+    precision = precision_score(gather_labels,
+                                gather_preds,
                                 average='macro',
                                 zero_division=0)
-    recall = recall_score(all_labels,
-                          all_preds,
+    recall = recall_score(gather_labels,
+                          gather_preds,
                           average='macro',
                           zero_division=0)
-    f1 = f1_score(all_labels,
-                  all_preds,
+    f1 = f1_score(gather_labels,
+                  gather_preds,
                   average='macro',
                   zero_division=0)
-    accuracy = accuracy_score(all_labels,
-                              all_preds)
-    
-    avg_loss = total_loss / len(test_loader)
-    print(f"Evaluation Average Loss between Batches in cuda:{fabric.global_rank}: {avg_loss:.4f}")
-    print(f"Total Evaluation Loss between Batches in cuda:{fabric.global_rank}: {total_loss:.4f}")
-    print(f"Evaluation precision in cuda:{fabric.global_rank} {precision:.4f}")
-    print(f"Evaluation recall in cuda:{fabric.global_rank} {recall:.4f}")
-    print(f"Evaluation accuracy in cuda:{fabric.global_rank} {accuracy:.4f}")
-    print(f"Evaluation F1-score in cuda:{fabric.global_rank} {f1:.4f}")
+    accuracy = accuracy_score(gather_labels,
+                              gather_preds)
 
+    gpu_avg_loss = total_loss / len(test_loader)
+    avg_loss = fabric.all_reduce(gpu_avg_loss)
+    
+    print(f"Evaluation Average Loss between Batches in cuda:{fabric.global_rank}: {gpu_avg_loss:.4f}")
+    fabric.barrier()
+    if fabric.is_global_zero:
+        print(f"Evaluation Average Loss between Batches: {avg_loss:.4f}")
+    fabric.barrier()
+    
+    print(f"Evaluation precision in cuda:{fabric.global_rank} {gpu_precision:.4f}")
+    fabric.barrier()
+    if fabric.is_global_zero:
+        print(f"Evaluation precision {precision:.4f}")
+    fabric.barrier()
+    
+    print(f"Evaluation recall in cuda:{fabric.global_rank} {gpu_recall:.4f}")
+    fabric.barrier()
+    if fabric.is_global_zero:
+        print(f"Evaluation recall {recall:.4f}")
+    fabric.barrier()
+    
+    print(f"Evaluation accuracy in cuda:{fabric.global_rank} {gpu_accuracy:.4f}")
+    fabric.barrier()
+    if fabric.is_global_zero:
+        print(f"Evaluation accuracy {accuracy:.4f}")
+    fabric.barrier()
+    
+    print(f"Evaluation F1-score in cuda:{fabric.global_rank} {gpu_f1:.4f}")
+    fabric.barrier()
+    if fabric.is_global_zero:
+        print(f"Evaluation F1-score {f1:.4f}")
     fabric.barrier()
 
-    return {"eval_loss": avg_loss, "precision": precision,
-            "recall": recall, "accuracy": accuracy, "f1_score": f1}
+    return {"gpu_eval_loss": gpu_avg_loss,"eval_loss": avg_loss,
+            "gpu_precision": gpu_precision, "gpu_recall": gpu_recall,
+            "gpu_accuracy": gpu_accuracy, "gpu_f1_score": gpu_f1,
+            "precision": precision, "recall": recall,
+            "accuracy": accuracy, "f1_score": f1}
+
+def all_gather(ten):
+    world_size = dist.get_world_size()
+    local_size = torch.tensor(ten.size(), device=ten.device)
+    all_sizes = [torch.zeros_like(local_size) for _ in range(world_size)]
+    dist.all_gather(all_sizes, local_size)
+    max_length = max(size[0] for size in all_sizes)
+
+    length_diff = max_length.item() - local_size[0].item()
+    if length_diff:
+        pad_size = (length_diff, *ten.size()[1:])
+        padding = torch.zeros(pad_size, device=ten.device, dtype=ten.dtype)
+        ten = torch.cat((ten, padding))
+
+    all_tensors_padded = [torch.zeros_like(ten) for _ in range(world_size)]
+    dist.all_gather(all_tensors_padded, ten)
+    all_tensors = []
+    for tensor_, size in zip(all_tensors_padded, all_sizes):
+        all_tensors.append(tensor_[:size[0]])
+    return all_tensors
 
 def draw_model_graph(model,
                      encoder_tokenizer,
@@ -402,8 +482,9 @@ def main(confile):
     if fabric.is_global_zero:
         timer = Timer(autoreset=True)
         timer.start('Training/Evaluation (%d epochs)' % epochs)
+    
     for epoch in range(epochs):
-        
+
         if fabric.is_global_zero:
             timer_epoch = Timer(autoreset=True)
             timer_epoch.start('Epoch %d / %d' %(epoch+1, epochs))
@@ -411,6 +492,7 @@ def main(confile):
         if fabric.is_global_zero:
             timer_train = Timer(autoreset=True)
             timer_train.start('Training')
+        
         # Train the model
         training_metrics = train_model(model,
                                        train_loader,
@@ -423,17 +505,13 @@ def main(confile):
                                        device='cuda',
                                        verbose=verbose)
         
-        #print(training_metrics)
-        #training_metrics = fabric.all_gather(training_metrics)
-        #print(training_metrics)
-        #exit()
-
         if fabric.is_global_zero:
             timer_train.stop()
 
         if fabric.is_global_zero:
             timer_eval = Timer(autoreset=True)
             timer_eval.start('Evaluation')
+        
         # Evaluate the model
         evaluation_metrics = evaluate_model(model,
                                             test_loader,
@@ -449,9 +527,16 @@ def main(confile):
 
         # Log training and evaluation metrics to wandb
         if config['get_wandb']:
-            wandb.log({"train_loss": training_metrics['train_loss'],
+            wandb.log({"gpu_train_loss": training_metrics['gpu_train_loss'],
+                       "train_loss": training_metrics['train_loss'],
+                       "gpu_eval_loss": evaluation_metrics['gpu_eval_loss'],
                        "eval_loss": evaluation_metrics['eval_loss'],
+                       "gpu_precision": evaluation_metrics['gpu_precision'],
+                       "gpu_recall": evaluation_metrics['gpu_recall'],
+                       "gpu_accuracy": evaluation_metrics['gpu_accuracy'],
+                       "gpu_F1": evaluation_metrics['gpu_f1_score'],
                        "precision": evaluation_metrics['precision'],
+                       "recall": evaluation_metrics['recall'],
                        "accuracy": evaluation_metrics['accuracy'],
                        "F1": evaluation_metrics['f1_score']},
                        step=epoch+1)
