@@ -89,13 +89,18 @@ def train_model(model,
 
         total_loss += loss.item()
 
+        if verbose > 0:
+            print(f"\tTraining Average Batch Loss in cuda:{fabric.global_rank}: {loss.item():.4f}")
+
+        fabric.barrier()
         if verbose > 0 and fabric.is_global_zero:
-            print(f"\tTraining Average Batch Loss: {loss.item():.4f}")
-            print('\t-----------------------')
+            print("----------------------")
 
     avg_loss = total_loss / len(train_loader)
-    print(f"Training Average Loss between Batches: {avg_loss:.4f}")
-    print(f"Total Training Loss between Batches: {total_loss:.4f}")
+    print(f"Training Average Loss between Batches in cuda:{fabric.global_rank}: {avg_loss:.4f}")
+    print(f"Total Training Loss between Batches in cuda:{fabric.global_rank}: {total_loss:.4f}")
+   
+    fabric.barrier()
 
     return {'train_loss': avg_loss}
 
@@ -173,10 +178,13 @@ def evaluate_model(model,
             all_preds.extend(predicted.cpu().numpy())
             correct = (predicted == labels).sum().item()
 
+            if verbose > 0:
+                print(f"\tEvaluation Average Batch Loss in cuda:{fabric.global_rank}: {loss.item():.4f}")
+                print(f"\tEvalutation correctly predicted structural tokens in cuda:{fabric.global_rank} {correct}/{len(labels)}")
+            
+            fabric.barrier()
             if verbose > 0 and fabric.is_global_zero:
-                print(f"\tEvaluation Average Batch Loss: {loss.item():.4f}")
-                print(f"\tEvalutation correctly predicted structural tokens {correct}/{len(labels)}")
-                print('\t-----------------------')
+                print("----------------------")
 
     # Compute F1 score, precision, and recall using sklearn
     precision = precision_score(all_labels,
@@ -195,12 +203,14 @@ def evaluate_model(model,
                               all_preds)
     
     avg_loss = total_loss / len(test_loader)
-    print(f"Evaluation Average Loss between Batches: {avg_loss:.4f}")
-    print(f"Total Evaluation Loss between Batches: {total_loss:.4f}")
-    print(f"Evaluation precision {precision:.4f}")
-    print(f"Evaluation recall {recall:.4f}")
-    print(f"Evaluation accuracy {accuracy:.4f}")
-    print(f"Evaluation F1-score {f1:.4f}")
+    print(f"Evaluation Average Loss between Batches in cuda:{fabric.global_rank}: {avg_loss:.4f}")
+    print(f"Total Evaluation Loss between Batches in cuda:{fabric.global_rank}: {total_loss:.4f}")
+    print(f"Evaluation precision in cuda:{fabric.global_rank} {precision:.4f}")
+    print(f"Evaluation recall in cuda:{fabric.global_rank} {recall:.4f}")
+    print(f"Evaluation accuracy in cuda:{fabric.global_rank} {accuracy:.4f}")
+    print(f"Evaluation F1-score in cuda:{fabric.global_rank} {f1:.4f}")
+
+    fabric.barrier()
 
     return {"eval_loss": avg_loss, "precision": precision,
             "recall": recall, "accuracy": accuracy, "f1_score": f1}
@@ -254,7 +264,7 @@ def main(confile):
     # Get the data
     structures_dir = config["data_path"]
     pdbs = glob.glob('%s*.pdb' % structures_dir)
-    pdbs = pdbs[:1000]
+    pdbs = pdbs[:200]
 
     # Get protein sequence and structural sequence (FoldSeeq) from raw data
     foldseek_path = config["foldseek_path"]
@@ -370,9 +380,14 @@ def main(confile):
     #    mem.get_CPU_memory()
     #    print('-----------------------------------------')
     
-    # Initialize wandb
-    if config['get_wandb'] and fabric.is_global_zero:
+    # Initialize wandb 
+    _group = "DDP_" + wandb.util.generate_id()
+    group = fabric.broadcast(_group, src=0)
+    if config['get_wandb']:
         wandb.init(project=config["wandb_project"],
+                   group=group,
+                   name=f"GPU{fabric.global_rank}",
+                   job_type=f"eval{fabric.global_rank}",
                    config={"dataset": "sample_DB",
                            "architecture": "Transformer",
                            "learning_rate": learning_rate,
@@ -384,15 +399,18 @@ def main(confile):
                            "dropout": dropout,
                            "num_layers": num_layers})
 
-    timer = Timer(autoreset=True)
-    timer.start('Training/Evaluation (%d epochs)' % epochs)
+    if fabric.is_global_zero:
+        timer = Timer(autoreset=True)
+        timer.start('Training/Evaluation (%d epochs)' % epochs)
     for epoch in range(epochs):
         
-        timer_epoch = Timer(autoreset=True)
-        timer_epoch.start('Epoch %d / %d' %(epoch+1, epochs))
+        if fabric.is_global_zero:
+            timer_epoch = Timer(autoreset=True)
+            timer_epoch.start('Epoch %d / %d' %(epoch+1, epochs))
 
-        timer_train = Timer(autoreset=True)
-        timer_train.start('Training')
+        if fabric.is_global_zero:
+            timer_train = Timer(autoreset=True)
+            timer_train.start('Training')
         # Train the model
         training_metrics = train_model(model,
                                        train_loader,
@@ -404,10 +422,18 @@ def main(confile):
                                        epsilon=epsilon,
                                        device='cuda',
                                        verbose=verbose)
-        timer_train.stop()
         
-        timer_eval = Timer(autoreset=True)
-        timer_eval.start('Evaluation')
+        #print(training_metrics)
+        #training_metrics = fabric.all_gather(training_metrics)
+        #print(training_metrics)
+        #exit()
+
+        if fabric.is_global_zero:
+            timer_train.stop()
+
+        if fabric.is_global_zero:
+            timer_eval = Timer(autoreset=True)
+            timer_eval.start('Evaluation')
         # Evaluate the model
         evaluation_metrics = evaluate_model(model,
                                             test_loader,
@@ -418,10 +444,11 @@ def main(confile):
                                             epsilon=epsilon,
                                             device='cuda',
                                             verbose=verbose)
-        timer_eval.stop()
-        
+        if fabric.is_global_zero:
+            timer_eval.stop()
+
         # Log training and evaluation metrics to wandb
-        if config['get_wandb'] and fabric.is_global_zero:
+        if config['get_wandb']:
             wandb.log({"train_loss": training_metrics['train_loss'],
                        "eval_loss": evaluation_metrics['eval_loss'],
                        "precision": evaluation_metrics['precision'],
@@ -429,9 +456,11 @@ def main(confile):
                        "F1": evaluation_metrics['f1_score']},
                        step=epoch+1)
 
-        timer_epoch.stop()
+        if fabric.is_global_zero:
+            timer_epoch.stop()
         
-    timer.stop('Training/Evaluation (%d epochs) ended' % epochs)
+    if fabric.is_global_zero:
+        timer.stop('Training/Evaluation (%d epochs) ended' % epochs)
 
 
 if __name__ == "__main__":
