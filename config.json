@@ -1,6 +1,7 @@
 {
     "data_path": "structures/filtered_structures/",
     "foldseek_path": "bin/foldseek",
+    "weight_path": "model_weights.pth",
     "get_wandb": true,
     "wandb_project": "ProtSeq2StrucAlpha_v0",
     "epochs": 2,
