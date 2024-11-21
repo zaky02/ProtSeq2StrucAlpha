@@ -1,13 +1,16 @@
 import torch
 import json
 import glob
+import pandas as pd
 from model import TransformerModel
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
 from utils.foldseek import get_struc_seq
+from lightning.fabric import Fabric
 
-torch.manual_seed(12345)
+torch.manual_seed(1234)
 
 def infer(model,
+          fabric,
           tokenizer_aa_seqs,
           tokenizer_struc_seqs,
           sequences,
@@ -33,14 +36,14 @@ def infer(model,
                                           padding=True,
                                           truncation=True)
 
-            encoder_input_ids = input_ids['input_ids'].to(device)
-            encoder_attention_mask = input_ids['attention_mask'].to(device)
+            encoder_input_ids = fabric.to_device(input_ids['input_ids'])
+            encoder_attention_mask = fabric.to_device(input_ids['attention_mask'])
             
             memory = model.encoder_block(encoder_input=encoder_input_ids,
                                          encoder_padding_mask=encoder_attention_mask)
             
             # Initialise decoder input with the <cls> token
-            decoder_input = torch.tensor([[cls_id]]).to(device)
+            decoder_input = fabric.to_device(torch.tensor([[cls_id]]))
             predicted_tokens = []
 
             # Autoregressive decoding
@@ -69,6 +72,15 @@ def main(confile):
     # Load configuration
     with open(confile, 'r') as f:
         config = json.load(f)
+    
+    num_gpus = config['num_gpus']
+    parallel_strategy = config['parallel_strategy']
+    fabric = Fabric(accelerator='cuda',
+                    devices=1,
+                    num_nodes=1,
+                    strategy=parallel_strategy)
+
+    fabric.launch()
 
     # Initialize tokenizers
     tokenizer_aa_seqs = SequenceTokenizer()
@@ -83,23 +95,26 @@ def main(confile):
                              num_heads=config['num_heads'],
                              num_layers=config['num_layers'],
                              ff_hidden_layer=config['ff_hidden_layer'],
-                             dropout=config['dropout']).to(device)
+                             dropout=config['dropout'])
+    model = fabric.setup_module(model)
+
+    weights_path = config['weight_path']
+    state = {'model': model} # torch.load(weights_path, map_location='cuda')
+    fabric.load(weights_path, state)
     
     # Load and extract sequences from PDB files
     structures_dir = config['data_path']
-    pdbs = glob.glob(f"{structures_dir}/*.pdb")
-    pdbs = pdbs[:10]
+    proteins = glob.glob(f"{structures_dir}/*.csv")
+    proteins = proteins[:10]
+
     sequences = []
-    for pdb in pdbs:
-        raw_data = get_struc_seq(config["foldseek_path"], pdb, chains=['A'])
-        if 'A' in raw_data:
-            aa_seq = raw_data['A'][0]
-            sequences.append(aa_seq)
-        else:
-            print(f"Warning: No valid chain 'A' sequence found in {pdb}")
+    for prot in proteins:
+        aa_seq = "".join((pd.read_csv(prot))["aa_seq"])
+        sequences.append(aa_seq)
 
     # Perform batch inference
     predicted_struc_seqs = infer(model,
+                                 fabric,
                                  tokenizer_aa_seqs,
                                  tokenizer_struc_seqs,
                                  sequences,
