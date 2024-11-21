@@ -7,6 +7,7 @@ import torch.distributed as dist
 import torchvision
 from torchview import draw_graph
 from lightning.fabric import Fabric
+import pandas as pd
 import random
 import json
 import glob
@@ -322,7 +323,7 @@ def draw_model_graph(model,
     torch.cuda.empty_cache()
 
 
-def main(confile): 
+def main(confile, foldseek, csv): 
 
     with open(confile, 'r') as f:
         config = json.load(f)
@@ -340,19 +341,36 @@ def main(confile):
                     devices=num_gpus,
                     num_nodes=1,
                     strategy=parallel_strategy)
-    
-    # Get the data
-    structures_dir = config["data_path"]
-    pdbs = glob.glob('%s*.pdb' % structures_dir)
-    pdbs = pdbs[:200]
 
-    # Get protein sequence and structural sequence (FoldSeeq) from raw data
-    foldseek_path = config["foldseek_path"]
-    raw_data = [get_struc_seq(foldseek_path, pdb, chains=['A'])['A'] for pdb in pdbs]
-    aa_seqs = [pdb[0] for pdb in raw_data]
-    struc_seqs = [pdb[1] for pdb in raw_data]
-    if verbose > 0 and fabric.is_global_zero:
-        print('- Total amount of structres given %d' %len(aa_seqs))
+    # Get the data from foldseek
+    if foldseek:
+        structures_dir = config["data_path"]
+        pdbs = glob.glob('%s*.pdb' % structures_dir)
+        pdbs = pdbs[:200]
+
+        # Get protein sequence and structural sequence (FoldSeeq) from raw data
+        foldseek_path = config["foldseek_path"]
+        raw_data = [get_struc_seq(foldseek_path, pdb, chains=['A'])['A'] for pdb in pdbs]
+        aa_seqs = [pdb[0] for pdb in raw_data]
+        struc_seqs = [pdb[1] for pdb in raw_data]
+        if verbose > 0 and fabric.is_global_zero:
+            print('- Total amount of structres given %d' %len(aa_seqs))
+
+    # Get the preloaded data from the csv files
+    if csv:
+        structures_dir = config['data_path']
+        proteins = glob.glob('%s/*.csv' % structures_dir)
+        proteins = proteins[:200]
+
+        # Get the structural and amino acid sequences from precalculated csv files
+        aa_seqs = []
+        struc_seqs = []
+        for prot in proteins:
+            csv = pd.read_csv(prot)
+            aa_seq = "".join(csv["aa_seq"])
+            struc_seq = "".join(csv["struc_seq"])
+            aa_seqs.append(aa_seq)
+            struc_seqs.append(struc_seq)
 
     # Load Dataset
     tokenizer_aa_seqs = SequenceTokenizer()
@@ -467,7 +485,6 @@ def main(confile):
         wandb.init(project=config["wandb_project"],
                    group=group,
                    name=f"GPU{fabric.global_rank}",
-                   job_type=f"eval{fabric.global_rank}",
                    config={"dataset": "sample_DB",
                            "architecture": "Transformer",
                            "learning_rate": learning_rate,
@@ -556,8 +573,16 @@ if __name__ == "__main__":
                         default='config.json',
                         help='Configuration file',
                         required=True)
+    parser.add_argument('--foldseek',
+                        help='Flag to retrieve data from foldseek',
+                         action='store_true')
+    parser.add_argument('--csv',
+                        help='Flag to retrieve data from csv files',
+                         action='store_true')
     args = parser.parse_args()
 
     confile = args.config
+    foldseek = args.foldseek
+    csv = args.csv
 
-    main(confile=confile)
+    main(confile=confile, foldseek=foldseek, csv=csv)
