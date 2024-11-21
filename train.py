@@ -19,6 +19,7 @@ import time
 from model import TransformerModel
 from utils.timer import Timer
 from utils.foldseek import get_struc_seq
+from utils.earlystopping import EarlyStopping
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
 from dataset import SeqsDataset, collate_fn
 from utils import memory as mem
@@ -105,7 +106,7 @@ def train_model(model,
     
     fabric.barrier()
     if fabric.is_global_zero:
-        print(f"Training Average Loss between Batches: {avg_loss:.4f}")
+        print(f"[Training Average Loss between Batches: {avg_loss:.4f}]")
    
     fabric.barrier()
 
@@ -243,31 +244,31 @@ def evaluate_model(model,
     print(f"Evaluation Average Loss between Batches in cuda:{fabric.global_rank}: {gpu_avg_loss:.4f}")
     fabric.barrier()
     if fabric.is_global_zero:
-        print(f"Evaluation Average Loss between Batches: {avg_loss:.4f}")
+        print(f"[Evaluation Average Loss between Batches: {avg_loss:.4f}]")
     fabric.barrier()
     
     print(f"Evaluation precision in cuda:{fabric.global_rank} {gpu_precision:.4f}")
     fabric.barrier()
     if fabric.is_global_zero:
-        print(f"Evaluation precision {precision:.4f}")
+        print(f"[Evaluation precision {precision:.4f}]")
     fabric.barrier()
     
     print(f"Evaluation recall in cuda:{fabric.global_rank} {gpu_recall:.4f}")
     fabric.barrier()
     if fabric.is_global_zero:
-        print(f"Evaluation recall {recall:.4f}")
+        print(f"[Evaluation recall {recall:.4f}]")
     fabric.barrier()
     
     print(f"Evaluation accuracy in cuda:{fabric.global_rank} {gpu_accuracy:.4f}")
     fabric.barrier()
     if fabric.is_global_zero:
-        print(f"Evaluation accuracy {accuracy:.4f}")
+        print(f"[Evaluation accuracy {accuracy:.4f}]")
     fabric.barrier()
     
     print(f"Evaluation F1-score in cuda:{fabric.global_rank} {gpu_f1:.4f}")
     fabric.barrier()
     if fabric.is_global_zero:
-        print(f"Evaluation F1-score {f1:.4f}")
+        print(f"[Evaluation F1-score {f1:.4f}]")
     fabric.barrier()
 
     return {"gpu_eval_loss": gpu_avg_loss,"eval_loss": avg_loss,
@@ -360,7 +361,7 @@ def main(confile, foldseek, csv):
     if csv:
         structures_dir = config['data_path']
         proteins = glob.glob('%s/*.csv' % structures_dir)
-        proteins = proteins[:200]
+        proteins = proteins[:100]
 
         # Get the structural and amino acid sequences from precalculated csv files
         aa_seqs = []
@@ -460,24 +461,13 @@ def main(confile, foldseek, csv):
     criterion = nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
    
     optimizer = fabric.setup_optimizers(optimizer)
+  
+    # Initialize weight saving based on early stopping
+    weights_path = config['weight_path']
+    early_stopping = EarlyStopping(patience=5,
+                                   delta=0.01,
+                                   verbose=True)
 
-    # Print model's state_dict
-    #print("Model's state_dict:")
-    #for param_tensor in model.state_dict():
-    #    print(param_tensor, "\t", model.state_dict()[param_tensor].size())
-    
-    # Print optimizer's state_dict
-    #print("Optimizer's state_dict:")
-    #for var_name in optimizer.state_dict():
-    #    print(var_name, "\t", optimizer.state_dict()[var_name])
-
-    #if fabric.is_global_zero:
-    #    print('Model optimizer and DataLoaders to fabric:')
-    #    mem.get_GPU_memory(device='cuda:0')
-    #    mem.get_GPU_memory(device='cuda:1')
-    #    mem.get_CPU_memory()
-    #    print('-----------------------------------------')
-    
     # Initialize wandb 
     _group = "DDP_" + wandb.util.generate_id()
     group = fabric.broadcast(_group, src=0)
@@ -541,7 +531,7 @@ def main(confile, foldseek, csv):
                                             verbose=verbose)
         if fabric.is_global_zero:
             timer_eval.stop()
-
+        
         # Log training and evaluation metrics to wandb
         if config['get_wandb']:
             wandb.log({"gpu_train_loss": training_metrics['gpu_train_loss'],
@@ -561,6 +551,12 @@ def main(confile, foldseek, csv):
         if fabric.is_global_zero:
             timer_epoch.stop()
         
+        # Check the early stopping conditions
+        early_stopping(evaluation_metrics['eval_loss'].item(),
+                       model,
+                       weights_path,
+                       fabric)
+
     if fabric.is_global_zero:
         timer.stop('Training/Evaluation (%d epochs) ended' % epochs)
 
