@@ -23,6 +23,7 @@ from utils.earlystopping import EarlyStopping
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
 from dataset import SeqsDataset, collate_fn
 from utils import memory as mem
+from collections import Counter
 
 torch.manual_seed(1234)
 
@@ -324,7 +325,7 @@ def draw_model_graph(model,
     torch.cuda.empty_cache()
 
 
-def main(confile, foldseek, csv): 
+def main(confile, dformat): 
 
     with open(confile, 'r') as f:
         config = json.load(f)
@@ -343,35 +344,36 @@ def main(confile, foldseek, csv):
                     num_nodes=1,
                     strategy=parallel_strategy)
 
-    # Get the data from foldseek
-    if foldseek:
-        structures_dir = config["data_path"]
-        pdbs = glob.glob('%s*.pdb' % structures_dir)
+    # Get the data from foldseek calculations from a directory of pdbs
+    if dformat == 'pdb':
+        pdbs_dir = config["data_as_pdbs"]
+        pdbs = glob.glob('%s*.pdb' % pdbs_dir)
         pdbs = pdbs[:200]
 
         # Get protein sequence and structural sequence (FoldSeeq) from raw data
         foldseek_path = config["foldseek_path"]
-        raw_data = [get_struc_seq(foldseek_path, pdb, chains=['A'])['A'] for pdb in pdbs]
-        aa_seqs = [pdb[0] for pdb in raw_data]
-        struc_seqs = [pdb[1] for pdb in raw_data]
-        if verbose > 0 and fabric.is_global_zero:
-            print('- Total amount of structres given %d' %len(aa_seqs))
-
-    # Get the preloaded data from the csv files
-    if csv:
-        structures_dir = config['data_path']
-        proteins = glob.glob('%s/*.csv' % structures_dir)
-        proteins = proteins[:100]
-
-        # Get the structural and amino acid sequences from precalculated csv files
+        raw_data = [get_struc_seq(foldseek_path, pdb) for pdb in pdbs]
         aa_seqs = []
         struc_seqs = []
-        for prot in proteins:
-            csv = pd.read_csv(prot)
-            aa_seq = "".join(csv["aa_seq"])
-            struc_seq = "".join(csv["struc_seq"])
-            aa_seqs.append(aa_seq)
-            struc_seqs.append(struc_seq)
+        for pdb in raw_data:
+            for chain in pdb.keys():
+                aa_seq = pdb[chain][0]
+                struc_seq = pdb[chain][1]
+                common_char, count = Counter(struc_seq).most_common(1)[0]
+                if (count / len(struc_seq)) <= 0.9 and len(aa_seq) > 30:
+                    aa_seqs.append(aa_seq)
+                    struc_seqs.append(struc_seq)
+    # Get the precalculated data from the csv files
+    elif dformat == 'csv':
+        csv = config['data_as_csv']
+        raw_data = pd.read_csv(csv)
+        raw_data = raw_data.head(200)
+        # Get the structural and amino acid sequences from precalculated csv files
+        aa_seqs = list(raw_data['aa_seq'])
+        struc_seqs = list(raw_data['struc_seq'])
+    
+    if verbose > 0 and fabric.is_global_zero:
+        print('- Total amount of structres given %d' %len(aa_seqs))
 
     # Load Dataset
     tokenizer_aa_seqs = SequenceTokenizer()
@@ -464,9 +466,11 @@ def main(confile, foldseek, csv):
   
     # Initialize weight saving based on early stopping
     weights_path = config['weight_path']
-    early_stopping = EarlyStopping(patience=5,
-                                   delta=0.01,
-                                   verbose=True)
+    patience = config['early_stopping_patience']
+    delta = config['early_stopping_delta']
+    early_stopping = EarlyStopping(patience=patience,
+                                   delta=delta,
+                                   verbose=verbose)
 
     # Initialize wandb 
     _group = "DDP_" + wandb.util.generate_id()
@@ -557,6 +561,11 @@ def main(confile, foldseek, csv):
                        weights_path,
                        fabric)
 
+        if early_stopping.early_stop:
+            if verbose > 0:
+                fabric.print(f"Early stopping after {epoch+1} epochs.")
+            break
+
     if fabric.is_global_zero:
         timer.stop('Training/Evaluation (%d epochs) ended' % epochs)
 
@@ -569,16 +578,18 @@ if __name__ == "__main__":
                         default='config.json',
                         help='Configuration file',
                         required=True)
-    parser.add_argument('--foldseek',
-                        help='Flag to retrieve data from foldseek',
-                         action='store_true')
-    parser.add_argument('--csv',
-                        help='Flag to retrieve data from csv files',
-                         action='store_true')
+    parser.add_argument('--dformat',
+                        help='Input data format. \
+                        Must be either pdb (directory of pdbs) \
+                        or csv  with columns \'ID aa_seq struc_seq\' \
+                        (fooldseek and seq already extracted using \
+                        scripts/preprocess_pdbs.py)',
+                        required=True)
     args = parser.parse_args()
 
+    if args.dformat not in ['pdb', 'csv']:
+        raise KeyError('dformat must be either pdb or csv')
     confile = args.config
-    foldseek = args.foldseek
-    csv = args.csv
+    dformat = args.dformat
 
-    main(confile=confile, foldseek=foldseek, csv=csv)
+    main(confile=confile, dformat=dformat)
