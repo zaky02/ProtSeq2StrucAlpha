@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 class EarlyStopping:
     def __init__(self, patience=5, delta=0, verbose=False):
@@ -11,30 +12,27 @@ class EarlyStopping:
         self.patience = patience 
         self.delta = delta 
         self.counter = 0 
-        self.best_score = None
+        self.best_score = np.inf
         self.early_stop = False
         self.verbose = verbose
         
-    def __call__(self, eval_loss, model, weights_path, fabric):
-        score = -eval_loss
-        if self.best_score is None:
+    def __call__(self, score, model, weights_path, fabric):
+        
+        if self.best_score - score > self.delta:
             self.best_score = score
-            self.save_checkpoint(model, weights_path, fabric)
             if self.verbose > 1:
-                fabric.print(f'EarlyStopping: Evaluation score improved ({self.best_score:.6f} --> {score:.6f}).')
-        elif score < self.best_score + self.delta:
+                fabric.print(f"Best evaluation loss updated to: {self.best_score:.6f}")
+                fabric.print("Saving model weights and reseting counter...")
+            self.counter = 0
+            self.save_checkpoint(model, weights_path, fabric)
+
+        else:
             self.counter += 1
             if self.verbose > 1:
-                fabric.print(f'EarlyStopping: EarlyStopping counter: {self.counter} out of {self.patience}')
+                fabric.print(f"EarlyStopping counter: {self.counter}")
+                fabric.print(f"{self.counter}/{self.patience} till early stopping is enforced")
             if self.counter >= self.patience:
                 self.early_stop = True
-        else:
-            self.best_score = score
-            self.save_checkpoint(model, weights_path, fabric)
-            self.counter = 0
-            if self.verbose > 1:
-                fabric.print(f'EarlyStopping: Evaluation score improved ({self.best_score:.6f} --> {score:.6f}).  Resetting counter to 0.')
             
     def save_checkpoint(self, model, weights_path, fabric):
-        state = {'model': model}
-        fabric.save(weights_path, state)
+        fabric.save(weights_path, {"model": model})
