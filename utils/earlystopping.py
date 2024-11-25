@@ -35,4 +35,5 @@ class EarlyStopping:
                 self.early_stop = True
             
     def save_checkpoint(self, model, weights_path, fabric):
-        fabric.save(weights_path, {"model": model})
+        state = {'model': model}
+        fabric.save(weights_path, state)
