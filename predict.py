@@ -32,10 +32,7 @@ def infer(model,
 
             # Tokenize the input amino acid sequence
             input_ids = tokenizer_aa_seqs(sequence,
-                                          max_len=max_len,
-                                          padding=True,
-                                          truncation=True)
-
+                                          max_len=max_len)
             encoder_input_ids = (input_ids['input_ids']).to(device)
             encoder_attention_mask = (input_ids['attention_mask']).to(device)
             
@@ -47,7 +44,7 @@ def infer(model,
             predicted_tokens = []
 
             # Autoregressive decoding
-            for _ in range(max_len - 1):
+            for _ in range(max_len):
                 decoder_padding_mask = (decoder_input == pad_id).to(device)
                 logits = model.decoder_block(decoder_input=decoder_input,
                                              memory=memory,
@@ -115,6 +112,7 @@ def main(seqs, confile, device=None):
                                       predicted_struc_seqs):
         print(f"Amino Acid Sequence: {aa_seq}\n")
         print(f"Predicted Structural Sequence: {pred_struc_seq}\n")
+        print('---------------------------------------------\n')
 
 
 if __name__ == "__main__":
