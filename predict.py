@@ -5,12 +5,12 @@ import pandas as pd
 from model import TransformerModel
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
 from utils.foldseek import get_struc_seq
-from lightning.fabric import Fabric
+import numpy as np
+from Bio import SeqIO
 
 torch.manual_seed(1234)
 
 def infer(model,
-          fabric,
           tokenizer_aa_seqs,
           tokenizer_struc_seqs,
           sequences,
@@ -36,14 +36,14 @@ def infer(model,
                                           padding=True,
                                           truncation=True)
 
-            encoder_input_ids = fabric.to_device(input_ids['input_ids'])
-            encoder_attention_mask = fabric.to_device(input_ids['attention_mask'])
+            encoder_input_ids = (input_ids['input_ids']).to(device)
+            encoder_attention_mask = (input_ids['attention_mask']).to(device)
             
             memory = model.encoder_block(encoder_input=encoder_input_ids,
                                          encoder_padding_mask=encoder_attention_mask)
             
             # Initialise decoder input with the <cls> token
-            decoder_input = fabric.to_device(torch.tensor([[cls_id]]))
+            decoder_input = (torch.tensor([[cls_id]])).to(device)
             predicted_tokens = []
 
             # Autoregressive decoding
@@ -68,26 +68,27 @@ def infer(model,
     return predicted_struc_seqs
 
 
-def main(confile):
+def main(seqs, confile, device=None):
+    
     # Load configuration
     with open(confile, 'r') as f:
         config = json.load(f)
     
-    num_gpus = config['num_gpus']
-    parallel_strategy = config['parallel_strategy']
-    fabric = Fabric(accelerator='cuda',
-                    devices=1,
-                    num_nodes=1,
-                    strategy=parallel_strategy)
-
-    fabric.launch()
+    # Load and extract sequences from fasta file
+    sequences = []
+    titles = []
+    for record in SeqIO.parse(seqs, "fasta"):
+        sequences.append(str(record.seq))
+        titles.append(record.id)
 
     # Initialize tokenizers
     tokenizer_aa_seqs = SequenceTokenizer()
     tokenizer_struc_seqs = FoldSeekTokenizer()
-
+    
     # Initialize device and model
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    if not device:
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
     model = TransformerModel(input_dim=tokenizer_aa_seqs.vocab_size,
                              output_dim=tokenizer_struc_seqs.vocab_size,
                              max_len=config['max_len'],
@@ -95,35 +96,23 @@ def main(confile):
                              num_heads=config['num_heads'],
                              num_layers=config['num_layers'],
                              ff_hidden_layer=config['ff_hidden_layer'],
-                             dropout=config['dropout'])
-    model = fabric.setup_module(model)
-
+                             dropout=config['dropout']).to(device)
+ 
     weights_path = config['weight_path']
-    state = {'model': model} # torch.load(weights_path, map_location='cuda')
-    fabric.load(weights_path, state)
+    state_dict = torch.load(weights_path)
+    state_dict = {key: value for key, value in state_dict['model'].items()}
+    model.load_state_dict(state_dict)
     
-    # Load and extract sequences from PDB files
-    structures_dir = config['data_path']
-    proteins = glob.glob(f"{structures_dir}/*.csv")
-    proteins = proteins[:10]
-
-    sequences = []
-    for prot in proteins:
-        aa_seq = "".join((pd.read_csv(prot))["aa_seq"])
-        sequences.append(aa_seq)
-
     # Perform batch inference
     predicted_struc_seqs = infer(model,
-                                 fabric,
                                  tokenizer_aa_seqs,
                                  tokenizer_struc_seqs,
                                  sequences,
                                  device)
 
     # Output results
-    for pdb, aa_seq, pred_struc_seq in zip(pdbs,
-                                           sequences,
-                                           predicted_struc_seqs):
+    for aa_seq, pred_struc_seq in zip(sequences,
+                                      predicted_struc_seqs):
         print(f"Amino Acid Sequence: {aa_seq}\n")
         print(f"Predicted Structural Sequence: {pred_struc_seq}\n")
 
@@ -136,7 +125,14 @@ if __name__ == "__main__":
     parser.add_argument('--config',
                         help='Path to configuration file',
                         required=True)
+    parser.add_argument('--seqs',
+                          help='Sequences to predict foldseek vocab\
+                          in fasta format',
+                          required=True)
+    parser.add_argument('--device',
+                        help='either cpu or cuda for gpu',
+                        default=None)
     args = parser.parse_args()
 
-    main(confile=args.config)
+    main(seqs=args.seqs, confile=args.config, device=args.device)
 
