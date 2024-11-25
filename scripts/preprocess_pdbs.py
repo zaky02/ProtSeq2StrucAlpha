@@ -34,7 +34,7 @@ def main(pdb_path, outname, filts):
                         if (count / len(struc_seq)) <= 0.90 and len(aa_seq) > 30:
                             writer.writerow([pdb_name, chain, aa_seq, struc_seq])
                         else:
-                            print('Filtered PDB:%s chain:%s'%(pdb_name, chain))
+                            print('PDB:%s chain:%s not fullfiling the filters' % (pdb_name, chain))
                     else:
                         writer.writerow([pdb_name, chain, aa_seq, struc_seq])
 
