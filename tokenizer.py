@@ -2,13 +2,13 @@ import torch
 import itertools
 from Bio import SeqIO
 from utils.foldseek import get_struc_seq
-from SaProt.utils.foldseek_util import get_struc_seq
+# from SaProt.utils.foldseek_util import get_struc_seq
 
 seq_vocab = "ACDEFGHIKLMNPQRSTVWY"
 foldseek_struc_vocab = "pynwrqhgdlvtmfsaeikc"
 # max_length refers to aa sequence length no to input length
 
-foldseek_path = '/home/phastos/Programs/mambaforge/envs/ProtSeq2StrucAlpha/lib/python3.10/site-packages/SaProt/bin/foldseek'
+foldseek_path = '/gpfs/projects/bsc72/isoul/ProtSeq2StrucAlpha/bin/foldseek'
 
 class SaProtTokenizer:
     def __init__(self):
