@@ -28,6 +28,11 @@ def unzip_pdb_gz_files(dir):
                     with open(pdb_path, 'wb') as f_out:
                         # Copy the contents from the .gz file to the .pdb file
                         shutil.copyfileobj(f_in, f_out)
+
+                # Remove the original .gz file after successful extraction
+                os.remove(gz_path)
+                print(f"Unzipped and removed '{gz_path}'.")
+
             except Exception as e:
                 print(f"Failed to unzip '{gz_path}': {e}")
 
