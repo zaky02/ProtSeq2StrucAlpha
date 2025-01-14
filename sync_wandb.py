@@ -62,7 +62,7 @@ def sync_all_offline_runs(api_key, wandb_dir):
 
 if __name__ == "__main__":
     # Your W&B API key
-    wandb_api_key = "c707377256b2e57dbb0b42bd3c36744b3d5617c8"
+    wandb_api_key = "wandb_key"
     
     # Path to the directory containing offline W&B runs
     wandb_directory = os.path.expanduser("./wandb/")
