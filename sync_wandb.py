@@ -19,7 +19,7 @@ def sync_all_offline_runs(api_key, wandb_dir):
     os.makedirs(synced_dir, exist_ok=True)
 
     # Find all offline run directories
-    offline_runs = [d for d in os.listdir(wandb_dir) if d.startswith("offline-run-")]
+    offline_runs = [d for d in os.listdir(wandb_dir) if d.startswith("offline-run-") or d.startswith("run-")]
     if not offline_runs:
         print("No offline runs found.")
         return
