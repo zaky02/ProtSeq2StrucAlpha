@@ -18,7 +18,7 @@ source activate ProtSeq2StrucAlpha
 echo "WandB"
 wandb login    # write it in the terminal to start wandb
 
-export WANDB_API_KEY=c707377256b2e57dbb0b42bd3c36744b3d5617c8
+export WANDB_API_KEY=$WANDB_KEY
 export WANDB_RUN_GROUP=$SLURM_JOB_ID
 export WANDB_CONSOLE=off
 export WANDB_DEBUG=TRUE
