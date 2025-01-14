@@ -342,7 +342,8 @@ def main(confile, dformat):
     fabric = Fabric(accelerator='cuda',
                     devices=num_gpus,
                     num_nodes=1,
-                    strategy=parallel_strategy)
+                    strategy=parallel_strategy,
+                    precision="bf16-mixed")
 
     # Get the data from foldseek calculations from a directory of pdbs
     if dformat == 'pdb':
@@ -367,7 +368,7 @@ def main(confile, dformat):
     elif dformat == 'csv':
         csv = config['data_as_csv']
         raw_data = pd.read_csv(csv)
-        raw_data = raw_data.head(200)
+        # raw_data = raw_data.head(10000)
         # Get the structural and amino acid sequences from precalculated csv files
         aa_seqs = list(raw_data['aa_seq'])
         struc_seqs = list(raw_data['struc_seq'])
@@ -418,6 +419,7 @@ def main(confile, dformat):
     # Get model hyperparamaters
     epochs = config['epochs']
     learning_rate = config['learning_rate']
+    weight_decay=config['weight_decay']
     epsilon = config["epsilon"]
     dim_model = config['dim_model']
     num_heads = config['num_heads']
@@ -459,7 +461,8 @@ def main(confile, dformat):
     if verbose > 0 and fabric.is_global_zero:
         summary(model)
 
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate,
+                           weight_decay=weight_decay)
     criterion = nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
    
     optimizer = fabric.setup_optimizers(optimizer)
