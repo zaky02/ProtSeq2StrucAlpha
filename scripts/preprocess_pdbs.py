@@ -21,7 +21,7 @@ def main(pdb_path, outname, filts):
         with alive_bar(len(pdbs), bar="fish") as bar:
             for pdb in pdbs:
                 raw_data = foldseek.get_struc_seq(
-                    "bin/foldseek",
+                    "../bin/foldseek",
                     pdb)
                 for chain in raw_data.keys():
                     aa_seq = raw_data[chain][0]
