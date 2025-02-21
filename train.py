@@ -6,6 +6,7 @@ from torchinfo import summary
 import torch.distributed as dist
 import torchvision
 from torchview import draw_graph
+from torch.optim.lr_scheduler import StepLR
 from lightning.fabric import Fabric
 import pandas as pd
 import random
@@ -21,7 +22,7 @@ from utils.timer import Timer
 from utils.foldseek import get_struc_seq
 from utils.earlystopping import EarlyStopping
 from tokenizer import SequenceTokenizer, FoldSeekTokenizer
-from dataset import SeqsDataset, collate_fn
+from dataset import SeqsDataset, prepare_data
 from utils import memory as mem
 from collections import Counter
 
@@ -380,38 +381,20 @@ def main(confile, dformat):
     tokenizer_aa_seqs = SequenceTokenizer()
     tokenizer_struc_seqs = FoldSeekTokenizer()
     dataset = SeqsDataset(aa_seqs, struc_seqs)
+    
+    fabric.launch()
 
-    # Split Dataset into training and testing
     test_split = config["test_split"]
     masking_ratio = config['masking_ratio']
-    test_size = int(test_split * len(dataset))
-    train_size = len(dataset) - test_size
-    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-    if verbose > 0 and fabric.is_global_zero:
-        print('- Total amount of tructures in training dataset %d' % len(train_dataset))
-        print('- Total amount of structres in testing dataset %d' % len(test_dataset))
-
-    fabric.launch()
-    
-    # Load DataLoader
     batch_size = config['batch_size']
     max_len = config['max_len']
-    train_loader =  DataLoader(train_dataset,
-                               batch_size=batch_size,
-                               shuffle=False,
-                               collate_fn=lambda batch: collate_fn(batch,
-                                                                   tokenizer_aa_seqs,
-                                                                   tokenizer_struc_seqs,
-                                                                   masking_ratio=masking_ratio,
-                                                                   max_len=max_len))
 
-    test_loader =  DataLoader(test_dataset,
-                              batch_size=batch_size,
-                              shuffle=False,
-                              collate_fn=lambda batch: collate_fn(batch,
-                                                                  tokenizer_aa_seqs,
-                                                                  tokenizer_struc_seqs,
-                                                                  max_len=max_len))
+    # Split Dataset into training and testing
+    train_loader, test_loader = prepare_data(dataset,test_split,
+                                             masking_ratio, batch_size,
+                                             tokenizer_aa_seqs, 
+                                             tokenizer_struc_seqs,
+                                             fabric, max_len, verbose)
     
     train_loader, test_loader = fabric.setup_dataloaders(train_loader,
                                                          test_loader)
@@ -448,7 +431,7 @@ def main(confile, dformat):
                          batch_size=batch_size,
                          max_len=max_len,
                          frabric=fabric)
-    
+
     if verbose > 0 and fabric.is_global_zero:
         print('- TransformerModel initialized with\n \
                 - max_len %d\n \
@@ -463,6 +446,7 @@ def main(confile, dformat):
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate,
                            weight_decay=weight_decay)
+    scheduler = StepLR(optimizer, step_size=2, gamma=0.1)
     criterion = nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
    
     optimizer = fabric.setup_optimizers(optimizer)
@@ -476,7 +460,7 @@ def main(confile, dformat):
                                    verbose=verbose)
 
     # Initialize wandb 
-    _group = "DDP_" + wandb.util.generate_id()
+    _group = "swiss_DDP_" + wandb.util.generate_id()
     group = fabric.broadcast(_group, src=0)
     if config['get_wandb']:
         wandb.init(project=config["wandb_project"],
