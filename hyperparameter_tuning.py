@@ -39,7 +39,7 @@ for c in dim_model:
             for t in ff_hidden_layer:
                 if c % m != 0:
                     continue
-                if t % c != 0:
+                if t != 4*c:
                     continue
 
                 config = json_dictionary.copy()
