@@ -97,17 +97,6 @@ def prepare_data(dataset,
     train_size = len(dataset) - test_size
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
-    # Plot the distribution of the sequence lengths of the train and validation datasets
-    if verbose >= 2 and fabric.is_global_zero:
-        fabric.print('Plotting the distribution of the unsorted lengths sequences...')
-        plt.figure()
-        train_prots_lengths = [len(prot[0]) for prot in train_dataset]
-        test_prots_lengths = [len(prot[0]) for prot in test_dataset]
-        plt.hist(train_prots_lengths, label='train proteins', alpha=0.5)
-        plt.hist(test_prots_lengths, label='test proteins', alpha=0.5)
-        plt.legend()
-        plt.savefig('hist_train_test_prots_unsorted.pdf')
-    
     # Sort the datasets based on the lengths of the sequences
     idxs_train = list(range(len(train_dataset)))
     idxs_test = list(range(len(test_dataset)))
@@ -127,8 +116,8 @@ def prepare_data(dataset,
         plt.figure()
         train_prots_lenghts = [len(train_dataset[idx][0]) for idx in idxs_train]
         test_prots_lenghts = [len(test_dataset[idx][0]) for idx in idxs_test]
-        plt.hist(train_prots_lenghts, label='train proteins', alpha=0.5)
-        plt.hist(test_prots_lenghts, label='test proteins', alpha=0.5)
+        plt.hist(train_prots_lenghts, label='train proteins', bins=50, alpha=0.5)
+        plt.hist(test_prots_lenghts, label='test proteins', bins=50, alpha=0.5)
         plt.legend()
         plt.savefig('hist_train_test_prots_sorted.pdf')
 
