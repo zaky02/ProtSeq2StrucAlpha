@@ -33,20 +33,45 @@ def sync_all_offline_runs(api_key, wandb_dir):
         # Build the sync command
         sync_command = f"WANDB_API_KEY={api_key} wandb sync {run_path}"
         
-        try:
-            # Execute the sync command
-            process = subprocess.Popen(
-                sync_command,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            stdout, stderr = process.communicate()
+        # Execute the sync command
+        process = subprocess.Popen(
+            sync_command,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        # stdout, stderr = process.communicate()
+        
+        try:  
+            while True:
+                # Read line from stdout
+                output = process.stdout.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                if output:
+                    print(output.strip())
+                    if "ERROR" in output:
+                        print(f"Run {run} sync encountered an ERROR and was aborted.")
+                        process.terminate()
+                        break
+
+                # Read line from stderr
+                error = process.stderr.readline()
+                if error == '' and process.poll() is not None:
+                    break
+                if error:
+                    print(error.strip())
+                    if "ERROR" in error:
+                        print(f"Run {run} sync encountered an ERROR and was aborted.")
+                        process.terminate()
+                        break
+
+            process.wait(timeout=10)
 
             # Output results
-            print("STDOUT:", stdout)
-            print("STDERR:", stderr)
+            # print("STDOUT:", stdout)
+            # print("STDERR:", stderr)
 
             if process.returncode == 0:
                 print(f"Run {run} synced successfully.")
@@ -57,6 +82,9 @@ def sync_all_offline_runs(api_key, wandb_dir):
                 print(f"Moved {run} to {synced_dir}.")
             else:
                 print(f"Failed to sync run {run}.")
+        
+        except subprocess.TimeoutExpired:
+            print(f"Run {run_id} sync timed out.")
         except Exception as e:
             print(f"An error occurred while syncing run {run}: {e}")
 
