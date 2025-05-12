@@ -362,14 +362,15 @@ def main(confile, dformat):
                 aa_seq = pdb[chain][0]
                 struc_seq = pdb[chain][1]
                 common_char, count = Counter(struc_seq).most_common(1)[0]
-                if (count / len(struc_seq)) <= 0.9 and len(aa_seq) > 30:
+                if (count / len(struc_seq)) <= 0.9 and len(aa_seq) > 30 and len(aa_seq) < 600:
                     aa_seqs.append(aa_seq)
                     struc_seqs.append(struc_seq)
+
     # Get the precalculated data from the csv files
     elif dformat == 'csv':
         csv = config['data_as_csv']
         raw_data = pd.read_csv(csv)
-        # raw_data = raw_data.head(10000)
+        raw_data = raw_data.head(1001)
         # Get the structural and amino acid sequences from precalculated csv files
         aa_seqs = list(raw_data['aa_seq'])
         struc_seqs = list(raw_data['struc_seq'])
@@ -520,6 +521,7 @@ def main(confile, dformat):
                                             epsilon=epsilon,
                                             device='cuda',
                                             verbose=verbose)
+
         if fabric.is_global_zero:
             timer_eval.stop()
         

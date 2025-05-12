@@ -1,36 +1,30 @@
 #!/bin/bash
 
+#SBATCH --job-name=protseq2struc
 #SBATCH --account=bsc72
-#SBATCH --qos=acc_bscls     # Quality of Service or gp_bscls (gp is for cpu) acc_debug acc_bscls (acc is for gpu)
-#SBATCH --job-name=test      # Job name (change it)
-#SBATCH --output=logs/test/%j.out     # Standard output and error log (change it)
-#SBATCH --error=logs/test/%j.err        # Standard error file output (change it)
-#SBATCH --cpus-per-task=20          # Number of CPU cores per task (maximum cpus is 80, must multiply by the number of tasks)
-#SBATCH --time=20:00:00            # Time limit hrs:min:sec
-#SBATCH --gres=gpu:4                # Request 1 GPU
-#SBATCH --nodes=1                   # Request 1 node
-#SBATCH --ntasks-per-node=4                  # Request 1 task (number of tasks must be as many as GPUs)
+#SBATCH --chdir=.
+#SBATCH --output=logs/protseq/%j.out
+#SBATCH --error=logs/protseq/%j.err
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --cpus-per-task=20
+#SBATCH --gres=gpu:4
+#SBATCH --time=02:00:00
+#SBATCH --qos=acc_debug
 
-ml impi mkl intel
+module purge
+ml bsc/1.0
+ml intel/2023.2.0
+ml cmake/3.25.1
+ml impi/2021.10.0
+ml mkl/2023.2.0
+ml miniconda/24.1.2
+ml anaconda
+
+eval "$(conda shell.bash hook)"
 source activate ProtSeq2StrucAlpha
 
-# Log in to WandB
-echo "WandB"
-wandb login    # write it in the terminal to start wandb
+wandb login c707377256b2e57dbb0b42bd3c36744b3d5617c8 
+wandb offline
 
-export WANDB_API_KEY=c707377256b2e57dbb0b42bd3c36744b3d5617c8
-export WANDB_RUN_GROUP=$SLURM_JOB_ID
-export WANDB_CONSOLE=off
-export WANDB_DEBUG=TRUE
-
-export CUDA_VISIBLE_DEVICES=0,1,2,3
-NCCL_DEBUG=INFO
-export TIMELIMIT=20:00:00    # maximum is 48h but if we reduce the amount of hours it goes in front of other jobs 
-echo $QOS
-
-set +e
-srun ~/.conda/envs/ProtSeq2StrucAlpha/bin/python train.py --config config.json --dformat csv
-set -e
-echo "Finished"
-
-# sbatch run.sh (this is to execute the file)
+srun python -u train.py --config config.json --dformat csv
