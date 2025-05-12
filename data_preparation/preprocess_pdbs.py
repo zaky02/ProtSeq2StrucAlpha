@@ -31,12 +31,12 @@ def main(pdb_path, outname, filts):
 
                     if filts:
                         common_char, count = Counter(struc_seq).most_common(1)[0]
-                        if (count / len(struc_seq)) <= 0.90 and (count / len(aa_seq)) <= 0.90 and len(aa_seq) > 30:
-                            writer.writerow([pdb_name, chain, aa_seq, struc_seq])
+                        if (count / len(struc_seq)) <= 0.90 and (count / len(aa_seq)) <= 0.90 and len(aa_seq) > 30 and len(aa_seq) < 600:
+                            writer.writerow([pdb_name, chain, aa_seq, struc_seq, plDDT])
                         else:
                             print('PDB:%s chain:%s not fullfiling the filters' % (pdb_name, chain))
                     else:
-                        writer.writerow([pdb_name, chain, aa_seq, struc_seq])
+                        writer.writerow([pdb_name, chain, aa_seq, struc_seq, plDDT])
 
                 bar()
 
