@@ -16,6 +16,7 @@ import wandb
 import numpy as np
 import sys
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
+from sklearn.model_selection import KFold
 import time
 from model import TransformerModel
 from utils.timer import Timer
@@ -52,6 +53,7 @@ def train_model(model,
         device (...): ...
         verbose (int): ...
     """
+    
     model.train()
     total_loss = 0.0
 
@@ -385,20 +387,40 @@ def main(confile, dformat):
     
     fabric.launch()
 
-    test_split = config["test_split"]
     masking_ratio = config['masking_ratio']
     batch_size = config['batch_size']
     max_len = config['max_len']
+    cross_val = config["cross_val"]
 
-    # Split Dataset into training and testing
-    train_loader, test_loader = prepare_data(dataset,test_split,
-                                             masking_ratio, batch_size,
-                                             tokenizer_aa_seqs, 
-                                             tokenizer_struc_seqs,
-                                             fabric, max_len, verbose)
-    
-    train_loader, test_loader = fabric.setup_dataloaders(train_loader,
-                                                         test_loader)
+    if cross_val:
+        # Split Dataset into training and testing using Cross-Validation
+        kf = KFold(n_splits=10, shuffle=True, random_state=42)
+        fold = 0
+
+        for train_index, val_index in kf.split(dataset):
+            train_subset = torch.utils.data.Subset(dataset, train_index)
+            val_subset = torch.utils.data.Subset(dataset, val_index)
+
+            train_loader, test_loader = prepare_data(train_subset, val_subset,
+                                                     masking_ratio, batch_size,
+                                                     tokenizer_aa_seqs,
+                                                     tokenizer_struc_seqs,
+                                                     fabric, max_len, verbose)
+
+            train_loader, test_loader = fabric.setup_dataloaders(train_loader,
+                                                                 test_loader)
+
+    else: 
+        # Split Dataset into training and testing traditionally (default)
+        test_split = config["test_split"]
+        train_loader, test_loader = prepare_data(dataset,test_split,
+                                                 masking_ratio, batch_size,
+                                                 tokenizer_aa_seqs, 
+                                                 tokenizer_struc_seqs,
+                                                 fabric, max_len, verbose)
+        
+        train_loader, test_loader = fabric.setup_dataloaders(train_loader,
+                                                             test_loader)
 
     # Get model hyperparamaters
     epochs = config['epochs']
@@ -459,6 +481,34 @@ def main(confile, dformat):
     early_stopping = EarlyStopping(patience=patience,
                                    delta=delta,
                                    verbose=verbose)
+
+    # Initialize resume training
+    if config['get_wandb'] and fabric.is_global_zero:
+        if resume_training:
+            wandb_run_id = open(f'wandb/{resume_training}.txt').read().strip()
+            wandb.init(
+                project=wandb_project,
+                config=wandb_config,
+                name=wandb_name,
+                id=wandb_run_id,
+                resume="must"
+            )
+            fabric.print(f"Resuming wandb run {wandb_run_id}")
+        else:
+            wandb.init(
+                project=wandb_project,
+                config=wandb_config,
+                name=wandb_name
+            )
+            with open(f'wandb/{wandb_name}.txt', 'w') as f:
+                f.write(wandb.run.id)
+
+    start_epoch = 0
+    if resume_training and os.path.exists(weights_path):
+        checkpoint = fabric.load(weights_path)
+        model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        start_epoch = checkpoint['epoch'] + 1
 
     # Initialize wandb 
     _group = "swiss_DDP_" + wandb.util.generate_id()
@@ -548,7 +598,10 @@ def main(confile, dformat):
         early_stopping(evaluation_metrics['eval_loss'].item(),
                        model,
                        weights_path,
-                       fabric)
+                       fabric,
+                       epoch,
+                       optimizer,
+                       checkpoint_epoch)
 
         if early_stopping.early_stop:
             if verbose > 0:
@@ -557,6 +610,9 @@ def main(confile, dformat):
 
     if fabric.is_global_zero:
         timer.stop('Training/Evaluation (%d epochs) ended' % epochs)
+
+    if cross_val:
+        fold += 1
 
 
 if __name__ == "__main__":
