@@ -7,6 +7,7 @@ from collections import Counter
 from alive_progress import alive_bar
 sys.path.append('..')
 from utils import foldseek
+from plddt_score_extraction import plldt_score_extracter
 
 def main(pdb_path, outname, filts):
     csv_path = os.path.dirname(outname)
@@ -16,13 +17,12 @@ def main(pdb_path, outname, filts):
 
     with open(outname, "w", newline="") as file:
         writer = csv.writer(file)
-        writer.writerow(["pdb", "chain", "aa_seq", "struc_seq"])
+        writer.writerow(["pdb", "chain", "aa_seq", "struc_seq", "pLDDT"])
     
         with alive_bar(len(pdbs), bar="fish") as bar:
             for pdb in pdbs:
-                raw_data = foldseek.get_struc_seq(
-                    "../bin/foldseek",
-                    pdb)
+                raw_data = foldseek.get_struc_seq("../bin/foldseek", pdb)
+                plddt = plldt_score_extracter(pdb)
                 for chain in raw_data.keys():
                     aa_seq = raw_data[chain][0]
                     struc_seq = raw_data[chain][1]
@@ -31,12 +31,12 @@ def main(pdb_path, outname, filts):
 
                     if filts:
                         common_char, count = Counter(struc_seq).most_common(1)[0]
-                        if (count / len(struc_seq)) <= 0.90 and (count / len(aa_seq)) <= 0.90 and len(aa_seq) > 30 and len(aa_seq) < 600:
-                            writer.writerow([pdb_name, chain, aa_seq, struc_seq, plDDT])
+                        if (count / len(struc_seq)) <= 0.90 and (count / len(aa_seq)) <= 0.90 and len(aa_seq) > 30 and len(aa_seq) < 600 and plddt >= 0.7:
+                            writer.writerow([pdb_name, chain, aa_seq, struc_seq, plddt])
                         else:
                             print('PDB:%s chain:%s not fullfiling the filters' % (pdb_name, chain))
                     else:
-                        writer.writerow([pdb_name, chain, aa_seq, struc_seq, plDDT])
+                        writer.writerow([pdb_name, chain, aa_seq, struc_seq, plddt])
 
                 bar()
 
