@@ -1,3 +1,5 @@
+import os
+import re
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset, random_split
@@ -327,6 +329,13 @@ def draw_model_graph(model,
     decoder_input = decoder_input.detach().cpu()
     torch.cuda.empty_cache()
 
+def get_latest_checkpoint(checkpoint_dir):
+    checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.endswith(".pth")]
+    if not checkpoint_files:
+        return None
+    checkpoint_files.sort(key=lambda x: int(re.findall(r'\d+', x)[-1]), reverse=True)
+    return os.path.join(checkpoint_dir, checkpoint_files[0])
+
 
 def main(confile, dformat): 
 
@@ -483,32 +492,16 @@ def main(confile, dformat):
                                    verbose=verbose)
 
     # Initialize resume training
-    if config['get_wandb'] and fabric.is_global_zero:
-        if resume_training:
-            wandb_run_id = open(f'wandb/{resume_training}.txt').read().strip()
-            wandb.init(
-                project=wandb_project,
-                config=wandb_config,
-                name=wandb_name,
-                id=wandb_run_id,
-                resume="must"
-            )
-            fabric.print(f"Resuming wandb run {wandb_run_id}")
+    if resume_training:
+        latest_ckpt = get_latest_checkpoint("checkpoints/")
+        if latest_ckpt is not None:
+            checkpoint = fabric.load(latest_ckpt)
+            model.load_state_dict(checkpoint['model'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            start_epoch = checkpoint.get('epoch', 0) + 1
+            fabric.print(f"Resumed training from checkpoint: {latest_ckpt} (Epoch {start_epoch})")
         else:
-            wandb.init(
-                project=wandb_project,
-                config=wandb_config,
-                name=wandb_name
-            )
-            with open(f'wandb/{wandb_name}.txt', 'w') as f:
-                f.write(wandb.run.id)
-
-    start_epoch = 0
-    if resume_training and os.path.exists(weights_path):
-        checkpoint = fabric.load(weights_path)
-        model.load_state_dict(checkpoint['model'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        start_epoch = checkpoint['epoch'] + 1
+            raise FileNotFoundError("No checkpoint found in 'checkpoints/' to resume from.")
 
     # Initialize wandb 
     _group = "swiss_DDP_" + wandb.util.generate_id()
