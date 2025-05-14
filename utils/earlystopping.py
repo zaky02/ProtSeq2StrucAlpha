@@ -1,3 +1,4 @@
+import os
 import torch
 import numpy as np
 
@@ -9,6 +10,7 @@ class EarlyStopping:
             delta (float): Minimum improvement in evaluation loss to reset patience counter.
             verbose (bool): Whether to print detailed logs during execution.
         """
+        self.checkpoint_dir = "/gpfs/projects/bsc72/isoul/ProtSeq2StrucAlpha/checkpoints/"
         self.patience = patience 
         self.delta = delta 
         self.counter = 0 
@@ -44,6 +46,7 @@ class EarlyStopping:
 
         if checkpoint_epoch:
             weights_path = weights_path.replace('.pth', f'_epoch_{epoch+1}.pth')
+            weights_path = os.path.join(self.checkpoint_dir, weights_path)
 
         fabric.save(weights_path, state)
 
