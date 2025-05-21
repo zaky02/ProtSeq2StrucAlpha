@@ -24,6 +24,7 @@
     "draw_model": false,
     "early_stopping_patience": 15,
     "early_stopping_delta": 0.001,
-    "resume_training": false,
-    "cross_val": false
+    "resume_training": true,
+    "checkpoint_epoch": true,
+    "cross_splits": 5
 }
