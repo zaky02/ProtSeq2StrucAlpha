@@ -143,3 +143,58 @@ def prepare_data(dataset,
                                                                   tokenizer_struc_seqs,
                                                                   max_len=max_len))
     return train_loader, test_loader
+
+def prepare_data_from_subsets(train_dataset,
+                              test_dataset,
+                              masking_ratio,
+                              batch_size,
+                              tokenizer_aa_seqs,
+                              tokenizer_struc_seqs,
+                              fabric,
+                              max_len,
+                              verbose):
+
+    # Optional: sort the datasets by sequence length
+    idxs_train = list(range(len(train_dataset)))
+    idxs_test = list(range(len(test_dataset)))
+
+    train_lengths = [(idx, len(train_dataset[idx][0]) + len(train_dataset[idx][1])) for idx in idxs_train]
+    test_lengths = [(idx, len(test_dataset[idx][0]) + len(test_dataset[idx][1])) for idx in idxs_test]
+    sorted_train_indices = [idx for idx, length in sorted(train_lengths, key=lambda x: x[1])]
+    sorted_test_indices = [idx for idx, length in sorted(test_lengths, key=lambda x: x[1])]
+
+    train_dataset = Subset(train_dataset, sorted_train_indices)
+    test_dataset = Subset(test_dataset, sorted_test_indices)
+
+    # Plot if verbose
+    if verbose >= 2 and fabric.is_global_zero:
+        fabric.print('Plotting the distribution of the sorted lengths sequences...')
+        plt.figure()
+        train_prots_lengths = [len(train_dataset[idx][0]) for idx in idxs_train]
+        test_prots_lengths = [len(test_dataset[idx][0]) for idx in idxs_test]
+        plt.hist(train_prots_lengths, label='train proteins', bins=50, alpha=0.5)
+        plt.hist(test_prots_lengths, label='test proteins', bins=50, alpha=0.5)
+        plt.legend()
+        plt.savefig('hist_train_test_prots_sorted_cv.pdf')
+
+    if verbose > 0 and fabric.is_global_zero:
+        fabric.print(f'- Total structures in training dataset: {len(train_dataset)}')
+        fabric.print(f'- Total structures in testing dataset: {len(test_dataset)}')
+
+    train_loader = DataLoader(train_dataset,
+                              batch_size=batch_size,
+                              shuffle=False,
+                              collate_fn=lambda batch: collate_fn(batch,
+                                                                  tokenizer_aa_seqs,
+                                                                  tokenizer_struc_seqs,
+                                                                  masking_ratio=masking_ratio,
+                                                                  max_len=max_len))
+
+    test_loader = DataLoader(test_dataset,
+                             batch_size=batch_size,
+                             shuffle=False,
+                             collate_fn=lambda batch: collate_fn(batch,
+                                                                 tokenizer_aa_seqs,
+                                                                 tokenizer_struc_seqs,
+                                                                 max_len=max_len))
+    return train_loader, test_loader
