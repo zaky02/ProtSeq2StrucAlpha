@@ -399,36 +399,16 @@ def main(confile, dformat):
     masking_ratio = config['masking_ratio']
     batch_size = config['batch_size']
     max_len = config['max_len']
-    cross_val = config["cross_val"]
+    test_split = config["test_split"]
 
-    if cross_val:
-        # Split Dataset into training and testing using Cross-Validation
-        kf = KFold(n_splits=10, shuffle=True, random_state=42)
-        fold = 0
-
-        for train_index, val_index in kf.split(dataset):
-            train_subset = torch.utils.data.Subset(dataset, train_index)
-            val_subset = torch.utils.data.Subset(dataset, val_index)
-
-            train_loader, test_loader = prepare_data(train_subset, val_subset,
-                                                     masking_ratio, batch_size,
-                                                     tokenizer_aa_seqs,
-                                                     tokenizer_struc_seqs,
-                                                     fabric, max_len, verbose)
-
-            train_loader, test_loader = fabric.setup_dataloaders(train_loader,
-                                                                 test_loader)
-
-    else: 
-        # Split Dataset into training and testing traditionally (default)
-        test_split = config["test_split"]
-        train_loader, test_loader = prepare_data(dataset,test_split,
-                                                 masking_ratio, batch_size,
-                                                 tokenizer_aa_seqs, 
-                                                 tokenizer_struc_seqs,
-                                                 fabric, max_len, verbose)
-        
-        train_loader, test_loader = fabric.setup_dataloaders(train_loader,
+    # Split Dataset into training and testing traditionally (default)
+    train_loader, test_loader = prepare_data(dataset,test_split,
+                                             masking_ratio, batch_size,
+                                             tokenizer_aa_seqs, 
+                                             tokenizer_struc_seqs,
+                                             fabric, max_len, verbose)
+    
+    train_loader, test_loader = fabric.setup_dataloaders(train_loader,
                                                              test_loader)
 
     # Get model hyperparamaters
@@ -487,11 +467,13 @@ def main(confile, dformat):
     weights_path = config['weight_path']
     patience = config['early_stopping_patience']
     delta = config['early_stopping_delta']
+    checkpoint_epoch = config['checkpoint_epoch']
     early_stopping = EarlyStopping(patience=patience,
                                    delta=delta,
                                    verbose=verbose)
 
     # Initialize resume training
+    resume_training = config['resume_training']
     if resume_training:
         latest_ckpt = get_latest_checkpoint("checkpoints/")
         if latest_ckpt is not None:
@@ -499,9 +481,7 @@ def main(confile, dformat):
             model.load_state_dict(checkpoint['model'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             start_epoch = checkpoint.get('epoch', 0) + 1
-            fabric.print(f"Resumed training from checkpoint: {latest_ckpt} (Epoch {start_epoch})")
-        else:
-            raise FileNotFoundError("No checkpoint found in 'checkpoints/' to resume from.")
+            fabric.print("Resumed training!")
 
     # Initialize wandb 
     _group = "swiss_DDP_" + wandb.util.generate_id()
@@ -603,9 +583,6 @@ def main(confile, dformat):
 
     if fabric.is_global_zero:
         timer.stop('Training/Evaluation (%d epochs) ended' % epochs)
-
-    if cross_val:
-        fold += 1
 
 
 if __name__ == "__main__":
