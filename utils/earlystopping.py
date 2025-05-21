@@ -50,5 +50,5 @@ class EarlyStopping:
 
         fabric.save(weights_path, state)
 
-        if self.verbose:
+        if self.verbose and fabric.is_global_zero:
             fabric.print(f"Checkpoint saved: {weights_path}")
