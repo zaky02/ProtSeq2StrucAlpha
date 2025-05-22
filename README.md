@@ -1,9 +1,62 @@
+# ProtSeq2StrucAlpha
+
+ProtSeq2StrucAlpha is a deep learning framework designed to predict Foldseek structural tokens directly from protein amino acid sequences. By leveraging a transformer-based encoder-decoder architecture, this project aims to bridge the gap between protein sequences and their structural representations, facilitating rapid structural annotation and analysis.
+
 ## Overview
-This repository contains a collection of scripts aimed at predicting Foldseek structural tokens based on a protein's amino acid sequence. The model used for this task is a multi-head attention encoder-decoder transformer, a powerful architecture known for its success in sequence-to-sequence tasks. The goal is to take the amino acid sequence of a protein as input and predict its corresponding Foldseek structural token sequence as output.
 
-One of the key advantages of using Foldseek structural tokens is that it allows us to optimize memory and storage requirements. By representing protein structures as tokens rather than storing the entire 3D models (like in PDB files), we can significantly reduce the amount of data needed for storing and processing structural information, while still retaining essential structural features.
+The core objective of ProtSeq2StrucAlpha is to translate protein sequences into their corresponding structural token sequences as defined by Foldseek. This approach enables:
 
-## Input and Output
-Input: Protein's amino acid sequence.
+- **Efficient Structural Annotation**: Rapid prediction of structural features without the need for computationally intensive methods.
+- **Enhanced Protein Analysis**: Facilitates downstream tasks such as protein classification, function prediction, and interaction analysis.
 
-Output: Corresponding sequence of Foldseek structural tokens.
+## Repository Structure
+
+- `bin/` – Executable scripts
+- `data_preparation/` – Dataset preparation scripts
+- `old_scripts/` – Archived legacy code
+- `utils/` – Utility functions
+- `config.json` – Model and training configuration
+- `dataset.py` – Dataset loading and preprocessing
+- `hyperparameter_tuning.py` – Hyperparameter optimization
+- `model.py` – Transformer model definition
+- `predict.py` – Prediction interface
+- `sync_wandb.py` – Weights & Biases experiment syncing
+- `tokenizer.py` – Protein sequence tokenization
+- `train.py` – Main training script
+- `train_cross.py` – Alternative training routine
+- `ProtSeq2StrucAlpha_environment.yml` – Conda environment file
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Python 3.8 or higher
+- Conda package manager
+
+### Installation
+
+```bash
+git clone https://github.com/zaky02/ProtSeq2StrucAlpha.git
+cd ProtSeq2StrucAlpha
+conda env create -f ProtSeq2StrucAlpha_environment.yml
+conda activate ProtSeq2StrucAlpha
+```
+
+## Usage
+
+### Training the Model
+
+To train the model with the default configuration:
+
+```bash
+python train.py --config CONFIG --dformat DFORMAT
+```
+
+### Making predictions
+
+After training, generate predictions using:
+
+```bash
+python predict.py --input_file path_to_input_sequences.fasta --output_file predictions.txt
+```
+
